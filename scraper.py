@@ -124,7 +124,7 @@ def scrape_hard_logs() -> list:
             df['Nazwa członka'] = (
                 df['Nazwa członka']
                 .apply(clean_nick)
-                .replace(['SKUTABABA', 'SKUTYSIURAS', 'ASPIRIN'], 'SKUTY SZKIELET')
+                .replace({'SKUTABABA': 'SKUTY SZKIELET', 'SKUTYSIURAS': 'SKUTY SZKIELET', 'ASPIRIN': 'SKUTY SZKIELET'})
             )
             
             df['Ilość'] = df['Przedmiot'].str.extract(r'(\d+)').astype(float).fillna(0)

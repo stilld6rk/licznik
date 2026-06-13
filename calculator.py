@@ -131,61 +131,56 @@ def build_ranking_content() -> str:
         reverse=True
     )
 
-    lines = [f"## 💎 RANKING GEM — {zakres}", f"**Wymagane: {LIMIT} 💎 / tydzień**\n"]
-
     ok, partial, zero = [], [], []
-    for i, (nick, dane) in enumerate(posortowani):
+    medals = ["🥇", "🥈", "🥉"]
+    rank = 0
+
+    for nick, dane in posortowani:
         ilosc_raw = dane['ilosc_raw']
         przen_z = dane['przeniesienie_z']
         wyswietlana = dane['ilosc_wyswietlana']
-        przen_na = dane['przeniesienie_na']
-        status = ilosc_raw + przen_z
+        efektywna = ilosc_raw + przen_z
 
-        bar = max(0, min(int(wyswietlana), LIMIT))
-        bar_str = "█" * bar + "░" * (LIMIT - bar)
-
-        extras = []
+        # Suffix z długiem/nadpłatą z POPRZEDNIEGO tygodnia
         if przen_z > 0:
-            extras.append(f"NadD +{int(przen_z)}💎")
+            suffix = f" *(+{int(przen_z)} z poprz. tyg.)*"
         elif przen_z < 0:
-            extras.append(f"NieD {int(przen_z)}💎")
-        extra_str = f" *({', '.join(extras)})*" if extras else ""
-
-        if i == 0 and status > 0:
-            ikona = "🥇"
-        elif i == 1 and status > 0:
-            ikona = "🥈"
-        elif i == 2 and status > 0:
-            ikona = "🥉"
-        elif status <= 0:
-            ikona = "○"
+            suffix = f" *({int(przen_z)} dług)*"
         else:
-            ikona = "🔹"
-
-        line = f"{ikona} **{nick}** — {int(wyswietlana)}/{LIMIT} 💎 `[{bar_str}]`{extra_str}"
+            suffix = ""
 
         if wyswietlana >= LIMIT:
+            ikona = medals[rank] if rank < 3 else "✅"
+            rank += 1
+            line = f"{ikona} **{nick}** — {int(wyswietlana)}/{LIMIT} 💎{suffix}"
             ok.append(line)
         elif wyswietlana > 0:
+            line = f"🔸 **{nick}** — {int(wyswietlana)}/{LIMIT} 💎{suffix}"
             partial.append(line)
         else:
+            line = f"❌ **{nick}** — 0/{LIMIT} 💎{suffix}"
             zero.append(line)
 
+    lines = [
+        f"╔══ 💎 **RANKING GEM** ══╗",
+        f"📅 {week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}  •  Cel: **{LIMIT} 💎/tydzień**",
+        "",
+    ]
+
     if ok:
-        lines.append("**✅ Zapłacone:**")
+        lines.append(f"**✅ Zapłacone ({len(ok)})**")
         lines.extend(ok)
         lines.append("")
     if partial:
-        lines.append("**🔸 Częściowo:**")
+        lines.append(f"**🔸 Częściowo ({len(partial)})**")
         lines.extend(partial)
         lines.append("")
     if zero:
-        lines.append("**❌ Brak wpłaty:**")
+        lines.append(f"**❌ Brak wpłaty ({len(zero)})**")
         lines.extend(zero)
         lines.append("")
 
-    lines.append(f"⏱️ *Ostatnia aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*")
-    lines.append("`NadD`=nadpłata | `NieD`=dług z poprzedniego tygodnia")
+    lines.append(f"*Aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*")
 
     content = "\n".join(lines)
     if len(content) > 2000:

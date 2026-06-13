@@ -32,7 +32,10 @@ def _get_all_member_info() -> dict:
     from database import get_session, GuildMember
     session = get_session()
     try:
-        members = session.query(GuildMember).filter_by(is_active=True).all()
+        members = session.query(GuildMember).filter(
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None)
+        ).all()
         return {
             m.nick: {
                 'join_date': m.join_date,

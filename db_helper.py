@@ -23,10 +23,13 @@ def get_or_create_member(nick: str, discord_id: int = None) -> GuildMember:
 
 
 def get_all_active_members() -> list:
-    """Zwróć wszystkich aktywnych członków"""
+    """Zwróć aktywnych członków z rolą Discord (discord_id ustawione)"""
     session = get_session()
     try:
-        members = session.query(GuildMember).filter_by(is_active=True).all()
+        members = session.query(GuildMember).filter(
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None)
+        ).all()
         return [m.nick for m in members]
     finally:
         session.close()

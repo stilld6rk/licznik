@@ -2,12 +2,13 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timedelta
-from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, GOLD, ORANGE, RED, GREEN
+from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week
 )
-from calculator import run_week_calc_and_send, update_pinned_ranking
+from calculator import run_week_calc_and_send, build_ranking_content
+from db_helper import get_pinned_message_id, save_pinned_message_id
 from scraper import run_scraper
 import logging
 
@@ -36,6 +37,31 @@ async def on_ready():
         daily_ranking_update.start()
 
 
+async def update_ranking():
+    """Wyślij lub edytuj przypiętą wiadomość rankingową przez bota"""
+    channel = bot.get_channel(RANKING_CHANNEL_ID)
+    if not channel:
+        logger.error(f"❌ Nie znaleziono kanału {RANKING_CHANNEL_ID}")
+        return
+
+    content = build_ranking_content()
+    msg_id = get_pinned_message_id()
+
+    if msg_id:
+        try:
+            msg = await channel.fetch_message(int(msg_id))
+            await msg.edit(content=content)
+            logger.info(f"✏️  Zaktualizowano wiadomość {msg_id}")
+            return
+        except discord.NotFound:
+            logger.warning("⚠️  Stara wiadomość usunięta, tworzę nową")
+            save_pinned_message_id(None)
+
+    new_msg = await channel.send(content)
+    save_pinned_message_id(str(new_msg.id))
+    logger.info(f"📤 Wysłano nową wiadomość {new_msg.id}")
+
+
 @tasks.loop(hours=1)
 async def auto_scrape():
     """Co godzinę scrapuj dane"""
@@ -47,7 +73,7 @@ async def auto_scrape():
 async def daily_ranking_update():
     """Co 24h aktualizuj przypiętą wiadomość rankingową"""
     logger.info("📊 Dzienna aktualizacja rankingu")
-    update_pinned_ranking()
+    await update_ranking()
 
 
 @bot.tree.command(name="wpłata_ręczna", description="Dodaj ręczną wpłatę: KTO → ZA KOGO, ILE, POWÓD")
@@ -108,9 +134,7 @@ async def wpata_reczna_command(
         
         logger.info(f"💳 {payer} → {recipient}: {amount}💎 ({reason})")
         
-        # Zaktualizuj ranking
-        week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).replace(hour=0, minute=0, second=0)
-        run_week_calc_and_send(week_start)
+        await update_ranking()
         
         # Embed potwierdzenia
         embed = discord.Embed(
@@ -379,11 +403,8 @@ async def init_ranking_command(interaction: discord.Interaction):
 
         await interaction.response.defer(ephemeral=True)
 
-        # Wyczyść stary ID żeby wymusić nową wiadomość
-        from db_helper import save_pinned_message_id
         save_pinned_message_id(None)
-
-        update_pinned_ranking()
+        await update_ranking()
         await interaction.followup.send("✅ Ranking wysłany na kanał webhooka!", ephemeral=True)
         logger.info(f"📌 Init ranking przez {interaction.user.name}")
 
@@ -404,7 +425,7 @@ async def aktualizuj_command(interaction: discord.Interaction):
             return
 
         await interaction.response.defer(ephemeral=True)
-        update_pinned_ranking()
+        await update_ranking()
         await interaction.followup.send("✅ Ranking zaktualizowany!", ephemeral=True)
         logger.info(f"📊 Ręczna aktualizacja przez {interaction.user.name}")
 
@@ -434,7 +455,7 @@ async def sync_scrape_command(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         
         run_scraper()
-        update_pinned_ranking()
+        await update_ranking()
 
         embed = discord.Embed(
             title="✅ Scraper ukończony i ranking zaktualizowany",

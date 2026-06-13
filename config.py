@@ -7,7 +7,8 @@ load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 ROLE_ID = int(os.getenv("ROLE_ID", "0"))
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # legacy, unused
+RANKING_CHANNEL_ID = int(os.getenv("RANKING_CHANNEL_ID", "0"))
 
 # Projekt Hard
 HARD_LOGIN = os.getenv("HARD_LOGIN")

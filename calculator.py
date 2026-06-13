@@ -1,16 +1,15 @@
 from datetime import datetime, timedelta
 from config import LIMIT
 from db_helper import (
-    get_all_active_members, get_payments_for_week, get_corrections_for_week,
-    get_carryover_debt, set_carryover_debt, is_week_off, get_member_info
+    get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
+    is_week_off
 )
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Obliczenia zaczynają się od tego tygodnia
-START_DATE = datetime(2026, 6, 1)  # poniedziałek tygodnia 01.06–07.06
+START_DATE = datetime(2026, 6, 1)  # poniedziałek pierwszego tygodnia
 
 
 def get_current_week_start() -> datetime:
@@ -18,8 +17,7 @@ def get_current_week_start() -> datetime:
     return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def get_all_weeks_since_start() -> list:
-    """Zwróć listę wszystkich tygodni od START_DATE do dziś"""
+def get_weeks_since_start() -> list:
     weeks = []
     week = START_DATE
     current = get_current_week_start()
@@ -29,91 +27,148 @@ def get_all_weeks_since_start() -> list:
     return weeks
 
 
-def calculate_week(week_start: datetime) -> dict:
-    members = get_all_active_members()
-    payments = get_payments_for_week(week_start)
-    corrections = get_corrections_for_week(week_start)
-    logger.info(f"📅 Tydzień: {week_start.strftime('%d.%m.%Y')} | Wpłaty: {payments}")
-
-    results = {}
-    for nick in members:
-        member_info = get_member_info(nick)
-        if member_info and member_info['join_date']:
-            join_date = member_info['join_date']
-            week_joined = (join_date - timedelta(days=join_date.weekday())).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            if week_start < week_joined:
-                continue
-
-        prev_debt = get_carryover_debt(nick, week_start)
-        payment_raw = payments.get(nick, 0)
-        correction_total = sum(c.amount for c in corrections.get(nick, []))
-        total = payment_raw + correction_total + prev_debt
-
-        results[nick] = {
-            "payment": payment_raw,
-            "correction": correction_total,
-            "carryover_in": prev_debt,
-            "total": total,
+def _get_all_member_info() -> dict:
+    """Batch fetch wszystkich info o członkach {nick: info}"""
+    from database import get_session, GuildMember
+    session = get_session()
+    try:
+        members = session.query(GuildMember).filter_by(is_active=True).all()
+        return {
+            m.nick: {
+                'join_date': m.join_date,
+                'discord_id': m.discord_id,
+            }
+            for m in members
         }
-
-        next_week = week_start + timedelta(days=7)
-        set_carryover_debt(nick, next_week, total - LIMIT)
-
-    return results
+    finally:
+        session.close()
 
 
-def recalculate_all():
-    """Przelicz wszystkie tygodnie od START_DATE (buduje carryover chain)"""
-    weeks = get_all_weeks_since_start()
-    logger.info(f"🔄 Przeliczam {len(weeks)} tygodni od {START_DATE.strftime('%d.%m.%Y')}")
-    for week in weeks:
-        if not is_week_off(week):
-            calculate_week(week)
+def oblicz_zaleglosci() -> tuple:
+    """
+    Identyczna logika jak w oryginalnym skrypcie.
+    Zwraca (wyniki_per_tydzien, aktywne_tygodnie).
+    """
+    lista_dc = get_all_active_members()
+    payments_grouped = get_all_payments_grouped()
+    corrections_grouped = get_all_corrections_grouped()
+    member_info_map = _get_all_member_info()
+
+    # Połącz payments + corrections per week+nick
+    rankingi_per_tydzien = {}
+    all_weeks = set(list(payments_grouped.keys()) + list(corrections_grouped.keys()))
+    for ws in all_weeks:
+        rankingi_per_tydzien[ws] = {}
+        for nick in lista_dc:
+            val = payments_grouped.get(ws, {}).get(nick, 0)
+            val += corrections_grouped.get(ws, {}).get(nick, 0)
+            rankingi_per_tydzien[ws][nick] = val
+
+    tygodnie_posortowane = get_weeks_since_start()
+    aktywne = [t for t in tygodnie_posortowane if not is_week_off(t)]
+
+    # In-memory carryover — identycznie jak oryginał
+    przeniesienia = {nick: 0 for nick in lista_dc}
+    wyniki = {}
+
+    for tydzien in aktywne:
+        ranking_dict = rankingi_per_tydzien.get(tydzien, {})
+        wyniki[tydzien] = {}
+
+        for nick in lista_dc:
+            # Logika daty dołączenia
+            member_info = member_info_map.get(nick)
+            if member_info and member_info['join_date']:
+                join_date = member_info['join_date']
+                start_week = (join_date - timedelta(days=join_date.weekday())).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                if tydzien < start_week:
+                    continue
+
+            wplata_raw = ranking_dict.get(nick, 0)
+            przen = przeniesienia[nick]
+            efektywna = wplata_raw + przen
+
+            if efektywna > LIMIT:
+                nadwyzka = efektywna - LIMIT
+                wyswietlana = LIMIT
+            elif efektywna <= 0:
+                nadwyzka = efektywna - LIMIT
+                wyswietlana = 0
+            else:
+                nadwyzka = 0
+                wyswietlana = efektywna
+
+            wyniki[tydzien][nick] = {
+                "ilosc_raw": wplata_raw,
+                "ilosc_wyswietlana": wyswietlana,
+                "przeniesienie_z": przen,
+                "przeniesienie_na": nadwyzka,
+            }
+            przeniesienia[nick] = nadwyzka
+
+        logger.info(f"📅 {tydzien.strftime('%d.%m.%Y')} | ranking_dict: {ranking_dict}")
+
+    return wyniki, aktywne
 
 
 def build_ranking_content() -> str:
-    # Najpierw przelicz wszystkie tygodnie żeby carryover był aktualny
-    recalculate_all()
+    wyniki, aktywne = oblicz_zaleglosci()
 
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
     zakres = f"{week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}"
 
-    results = calculate_week(week_start)
+    wyniki_tygodnia = wyniki.get(week_start, {})
 
-    if not results:
+    if not wyniki_tygodnia:
         return f"## 💎 RANKING GEM — {zakres}\n\nBrak danych."
 
-    sorted_members = sorted(results.items(), key=lambda x: x[1]['total'], reverse=True)
+    posortowani = sorted(
+        wyniki_tygodnia.items(),
+        key=lambda x: x[1]['ilosc_raw'] + x[1]['przeniesienie_z'],
+        reverse=True
+    )
 
     lines = [f"## 💎 RANKING GEM — {zakres}", f"**Wymagane: {LIMIT} 💎 / tydzień**\n"]
 
     ok, partial, zero = [], [], []
-    for nick, data in sorted_members:
-        total = data['total']
-        carry = data['carryover_in']
+    for i, (nick, dane) in enumerate(posortowani):
+        ilosc_raw = dane['ilosc_raw']
+        przen_z = dane['przeniesienie_z']
+        wyswietlana = dane['ilosc_wyswietlana']
+        przen_na = dane['przeniesienie_na']
+        status = ilosc_raw + przen_z
 
-        bar = max(0, min(int(total), LIMIT))
+        bar = max(0, min(int(wyswietlana), LIMIT))
         bar_str = "█" * bar + "░" * (LIMIT - bar)
 
         extras = []
-        if carry > 0:
-            extras.append(f"nadpłata +{int(carry)}💎")
-        elif carry < 0:
-            extras.append(f"dług {int(carry)}💎")
+        if przen_z > 0:
+            extras.append(f"NadD +{int(przen_z)}💎")
+        elif przen_z < 0:
+            extras.append(f"NieD {int(przen_z)}💎")
         extra_str = f" *({', '.join(extras)})*" if extras else ""
 
-        if total >= LIMIT:
-            line = f"✅ **{nick}** — {int(total)}/{LIMIT} 💎 `[{bar_str}]`{extra_str}"
+        if i == 0 and status > 0:
+            ikona = "🥇"
+        elif i == 1 and status > 0:
+            ikona = "🥈"
+        elif i == 2 and status > 0:
+            ikona = "🥉"
+        elif status <= 0:
+            ikona = "○"
+        else:
+            ikona = "🔹"
+
+        line = f"{ikona} **{nick}** — {int(wyswietlana)}/{LIMIT} 💎 `[{bar_str}]`{extra_str}"
+
+        if wyswietlana >= LIMIT:
             ok.append(line)
-        elif total > 0:
-            line = f"🔸 **{nick}** — {int(total)}/{LIMIT} 💎 `[{bar_str}]`{extra_str}"
+        elif wyswietlana > 0:
             partial.append(line)
         else:
-            debt_str = f" (dług {int(total)}💎)" if total < 0 else ""
-            line = f"❌ **{nick}** — 0/{LIMIT} 💎 `[{bar_str}]`{debt_str}{extra_str}"
             zero.append(line)
 
     if ok:
@@ -130,6 +185,7 @@ def build_ranking_content() -> str:
         lines.append("")
 
     lines.append(f"⏱️ *Ostatnia aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*")
+    lines.append("`NadD`=nadpłata | `NieD`=dług z poprzedniego tygodnia")
 
     content = "\n".join(lines)
     if len(content) > 2000:
@@ -137,6 +193,6 @@ def build_ranking_content() -> str:
     return content
 
 
-# kept for backward compat
+# backward compat
 def run_week_calc_and_send(week_start: datetime):
     pass

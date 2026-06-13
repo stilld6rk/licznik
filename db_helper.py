@@ -70,8 +70,8 @@ def add_payment(nick: str, amount: float, date: datetime, item_name: str = None)
     session = get_session()
     try:
         member = get_or_create_member(nick)
-        week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0)
-        
+        week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
         payment = Payment(
             member_id=member.id,
             amount=amount,
@@ -252,6 +252,44 @@ def delete_correction(correction_id: int):
             session.commit()
             return True
         return False
+    finally:
+        session.close()
+
+
+def get_all_payments_grouped() -> dict:
+    """Zwróć wszystkie wpłaty pogrupowane {week_start: {nick: total}}"""
+    session = get_session()
+    try:
+        results = session.query(
+            Payment.week_start,
+            GuildMember.nick,
+            func.sum(Payment.amount).label('total')
+        ).join(GuildMember).group_by(Payment.week_start, GuildMember.nick).all()
+
+        grouped = {}
+        for week_start, nick, total in results:
+            ws = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            if ws not in grouped:
+                grouped[ws] = {}
+            grouped[ws][nick] = float(total or 0)
+        return grouped
+    finally:
+        session.close()
+
+
+def get_all_corrections_grouped() -> dict:
+    """Zwróć wszystkie korekty pogrupowane {week_start: {nick: total}}"""
+    session = get_session()
+    try:
+        results = session.query(ManualCorrection).all()
+        grouped = {}
+        for corr in results:
+            ws = corr.week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            nick = corr.recipient.nick
+            if ws not in grouped:
+                grouped[ws] = {}
+            grouped[ws][nick] = grouped[ws].get(nick, 0) + float(corr.amount)
+        return grouped
     finally:
         session.close()
 

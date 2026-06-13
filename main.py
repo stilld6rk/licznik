@@ -8,7 +8,7 @@ import asyncio
 from bot import run_bot
 from database import init_db
 from scraper import run_scraper
-from calculator import update_all_weeks
+from calculator import build_ranking_content
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +31,7 @@ def main():
         # Pierwsza synchronizacja
         logger.info("🔄 Pierwsza synchronizacja danych...")
         run_scraper()
-        update_all_weeks()
+        build_ranking_content()  # warm up calculation on startup
         
         # Uruchom bota
         logger.info("🤖 Uruchamiam Discord bota...")

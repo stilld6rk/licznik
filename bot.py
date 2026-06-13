@@ -46,7 +46,9 @@ async def update_ranking():
         logger.error(f"❌ Nie znaleziono kanału {RANKING_CHANNEL_ID}")
         return
 
-    content = build_ranking_content()
+    import asyncio
+    loop = asyncio.get_event_loop()
+    content = await loop.run_in_executor(None, build_ranking_content)
     msg_id = get_pinned_message_id()
 
     if msg_id:

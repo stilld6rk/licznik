@@ -23,24 +23,36 @@ def get_discord_members():
     """Pobierz listę członków z roli Discord"""
     headers = {"Authorization": f"Bot {BOT_TOKEN}"}
     url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members?limit=1000"
-    
-    members = []
+
+    logger.info(f"🔍 Pobieram członków z Guild ID: {GUILD_ID}, Role ID: {ROLE_ID}")
     response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        for member in response.json():
-            if ROLE_ID in member.get('roles', []):
-                user = member.get('user', {})
-                nick = clean_nick(member.get('nick') or user.get('display_name') or user.get('username'))
-                
-                if nick:
-                    # Aliasy
-                    if nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
-                        nick = "SKUTY SZKIELET"
-                    
-                    member_obj = get_or_create_member(nick, user.get('id'))
-                    members.append(nick)
-    
+    logger.info(f"📡 API status: {response.status_code}")
+
+    if response.status_code != 200:
+        logger.error(f"❌ Błąd API Discord: {response.status_code} — {response.text}")
+        return []
+
+    all_members = response.json()
+    logger.info(f"👥 Wszystkich członków na serwerze: {len(all_members)}")
+
+    members = []
+    for member in all_members:
+        roles = member.get('roles', [])
+        user = member.get('user', {})
+        username = user.get('username', '?')
+
+        if str(ROLE_ID) in [str(r) for r in roles]:
+            nick = clean_nick(member.get('nick') or user.get('display_name') or username)
+            if nick:
+                if nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
+                    nick = "SKUTY SZKIELET"
+                get_or_create_member(nick, user.get('id'))
+                members.append(nick)
+                logger.info(f"  ✅ Znaleziono członka z rolą: {nick}")
+        else:
+            logger.debug(f"  ⏭️  Brak roli: {username} (role: {roles})")
+
+    logger.info(f"📋 Znaleziono {len(members)} członków z rolą {ROLE_ID}")
     return list(set(members))
 
 

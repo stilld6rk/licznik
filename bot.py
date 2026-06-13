@@ -369,6 +369,29 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
         )
 
 
+@bot.tree.command(name="init_ranking", description="[ADMIN] Wyślij ranking po raz pierwszy na kanał")
+async def init_ranking_command(interaction: discord.Interaction):
+    """Wyślij pierwszą wiadomość rankingową (lub zastąp istniejącą)"""
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Wyczyść stary ID żeby wymusić nową wiadomość
+        from db_helper import save_pinned_message_id
+        save_pinned_message_id(None)
+
+        update_pinned_ranking()
+        await interaction.followup.send("✅ Ranking wysłany na kanał webhooka!", ephemeral=True)
+        logger.info(f"📌 Init ranking przez {interaction.user.name}")
+
+    except Exception as e:
+        logger.error(f"❌ Błąd init_ranking: {e}")
+        await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+
+
 @bot.tree.command(name="aktualizuj", description="[ADMIN] Ręcznie zaktualizuj przypiętą wiadomość rankingową")
 async def aktualizuj_command(interaction: discord.Interaction):
     """Ręczna aktualizacja przypiętej wiadomości rankingowej"""

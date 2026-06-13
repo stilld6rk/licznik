@@ -279,16 +279,20 @@ def get_pinned_message_id() -> str | None:
         session.close()
 
 
-def save_pinned_message_id(message_id: str):
-    """Zapisz ID przypiętej wiadomości rankingowej"""
+def save_pinned_message_id(message_id: str | None):
+    """Zapisz ID przypiętej wiadomości rankingowej (None = reset)"""
     session = get_session()
     try:
         msg = session.query(WeeklyMessage).filter_by(week_start=_PINNED_SENTINEL).first()
-        if msg:
-            msg.message_id = message_id
+        if message_id is None:
+            if msg:
+                session.delete(msg)
         else:
-            msg = WeeklyMessage(week_start=_PINNED_SENTINEL, message_id=message_id)
-            session.add(msg)
+            if msg:
+                msg.message_id = message_id
+            else:
+                msg = WeeklyMessage(week_start=_PINNED_SENTINEL, message_id=message_id)
+                session.add(msg)
         session.commit()
     finally:
         session.close()

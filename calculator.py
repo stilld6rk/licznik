@@ -136,28 +136,28 @@ def build_ranking_content() -> str:
     rank = 0
 
     for nick, dane in posortowani:
-        ilosc_raw = dane['ilosc_raw']
-        wyswietlana = dane['ilosc_wyswietlana']
+        ilosc_raw = int(dane['ilosc_raw'])
+        przen_z = int(dane['przeniesienie_z'])
+        efektywna = ilosc_raw + przen_z
 
-        # Suffix pokazuje co PRZECHODZI na kolejny tydzień (nie skąd przyszło)
-        przen_na = dane['przeniesienie_na']
-        if przen_na > 0:
-            suffix = f" *(→ +{int(przen_na)} nadpłata)*"
-        elif przen_na < 0:
-            suffix = f" *(→ {int(przen_na)} dług)*"
+        # "(wpłacono X💎 | NieD -4)" or "(wpłacono X💎 | NadD +2)" or "(wpłacono X💎)"
+        if przen_z > 0:
+            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
+        elif przen_z < 0:
+            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
         else:
-            suffix = ""
+            detail = f"(wpłacono {ilosc_raw}💎)"
 
-        if wyswietlana >= LIMIT:
+        if efektywna >= LIMIT:
             ikona = medals[rank] if rank < 3 else "✅"
             rank += 1
-            line = f"{ikona} **{nick}** — {int(wyswietlana)}/{LIMIT} 💎{suffix}"
+            line = f"{ikona} **{nick}** — {efektywna}💎 {detail}"
             ok.append(line)
-        elif wyswietlana > 0:
-            line = f"🔸 **{nick}** — {int(wyswietlana)}/{LIMIT} 💎{suffix}"
+        elif efektywna > 0:
+            line = f"🔸 **{nick}** — {efektywna}💎 {detail}"
             partial.append(line)
         else:
-            line = f"❌ **{nick}** — 0/{LIMIT} 💎{suffix}"
+            line = f"❌ **{nick}** — {efektywna}💎 {detail}"
             zero.append(line)
 
     lines = [

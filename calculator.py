@@ -140,13 +140,13 @@ def build_ranking_content() -> str:
         przen_z = int(dane['przeniesienie_z'])
         efektywna = ilosc_raw + przen_z
 
-        # "(wpłacono X💎 | NieD -4)" or "(wpłacono X💎 | NadD +2)" or "(wpłacono X💎)"
+        # "(X💎 | NieD -4)" or "(X💎 | NadD +2)" or "(X💎)"
         if przen_z > 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
+            detail = f"({ilosc_raw}💎 | NadD +{przen_z})"
         elif przen_z < 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
+            detail = f"({ilosc_raw}💎 | NieD {przen_z})"
         else:
-            detail = f"(wpłacono {ilosc_raw}💎)"
+            detail = f"({ilosc_raw}💎)"
 
         if efektywna >= LIMIT:
             ikona = medals[rank] if rank < 3 else "✅"
@@ -183,7 +183,8 @@ def build_ranking_content() -> str:
 
     content = "\n".join(lines)
     if len(content) > 2000:
-        content = content[:1990] + "..."
+        cutoff = content.rfind("\n", 0, 1970)
+        content = content[:cutoff] + f"\n*... i {content[cutoff:].count(chr(10))} więcej. Aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*"
     return content
 
 

@@ -118,12 +118,12 @@ def build_ranking_content() -> str:
 
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
-    zakres = f"{week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}"
 
     wyniki_tygodnia = wyniki.get(week_start, {})
 
     if not wyniki_tygodnia:
-        return f"## 💎 RANKING GEM — {zakres}\n\nBrak danych."
+        zakres = f"{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}"
+        return f"💎 RANKING TYGODNIOWY ({zakres})\n\nBrak danych."
 
     posortowani = sorted(
         wyniki_tygodnia.items(),
@@ -131,60 +131,37 @@ def build_ranking_content() -> str:
         reverse=True
     )
 
-    ok, partial, zero = [], [], []
     medals = ["🥇", "🥈", "🥉"]
-    rank = 0
+    medal_idx = 0
+    lines = [f"💎 RANKING TYGODNIOWY ({week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')})"]
 
     for nick, dane in posortowani:
         ilosc_raw = int(dane['ilosc_raw'])
         przen_z = int(dane['przeniesienie_z'])
         efektywna = ilosc_raw + przen_z
 
-        # "(X💎 | NieD -4)" or "(X💎 | NadD +2)" or "(X💎)"
         if przen_z > 0:
-            detail = f"({ilosc_raw}💎 | NadD +{przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
         elif przen_z < 0:
-            detail = f"({ilosc_raw}💎 | NieD {przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
         else:
-            detail = f"({ilosc_raw}💎)"
+            detail = f"(wpłacono {ilosc_raw}💎)"
 
         if efektywna >= LIMIT:
-            ikona = medals[rank] if rank < 3 else "✅"
-            rank += 1
-            line = f"{ikona} **{nick}** — {efektywna}💎 {detail}"
-            ok.append(line)
+            ikona = medals[medal_idx] if medal_idx < 3 else "🔹"
+            medal_idx += 1
         elif efektywna > 0:
-            line = f"🔸 **{nick}** — {efektywna}💎 {detail}"
-            partial.append(line)
+            ikona = "🔹"
         else:
-            line = f"❌ **{nick}** — {efektywna}💎 {detail}"
-            zero.append(line)
+            ikona = "○"
 
-    lines = [
-        f"╔══ 💎 **RANKING GEM** ══╗",
-        f"📅 {week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}",
-        "",
-    ]
-
-    if ok:
-        lines.append(f"**✅ Zapłacone ({len(ok)})**")
-        lines.extend(ok)
-        lines.append("")
-    if partial:
-        lines.append(f"**🔸 Częściowo ({len(partial)})**")
-        lines.extend(partial)
-        lines.append("")
-    if zero:
-        lines.append(f"**❌ Brak wpłaty ({len(zero)})**")
-        lines.extend(zero)
-        lines.append("")
-
-    lines.append(f"*Aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*")
+        lines.append(f"{ikona} {nick}: {efektywna}💎 {detail}")
 
     content = "\n".join(lines)
     if len(content) > 2000:
         cutoff = content.rfind("\n", 0, 1970)
-        content = content[:cutoff] + f"\n*... i {content[cutoff:].count(chr(10))} więcej. Aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}*"
+        remaining = content[cutoff:].count("\n")
+        content = content[:cutoff] + f"\n*... i {remaining} więcej*"
     return content
 
 

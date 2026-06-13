@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Obliczenia zaczynają się od tego tygodnia
-START_DATE = datetime(2026, 6, 2)  # poniedziałek tygodnia 02.06–08.06
+START_DATE = datetime(2026, 6, 1)  # poniedziałek tygodnia 01.06–07.06
 
 
 def get_current_week_start() -> datetime:

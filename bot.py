@@ -66,7 +66,9 @@ async def update_ranking():
 async def auto_scrape():
     """Co godzinę scrapuj dane"""
     logger.info("🔄 Auto-scraper uruchomiony")
-    run_scraper()
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, run_scraper)
 
 
 @tasks.loop(hours=24)

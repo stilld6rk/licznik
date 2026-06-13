@@ -28,10 +28,9 @@ def main():
         logger.info("📦 Inicjalizuję bazę danych...")
         init_db()
         
-        # Pierwsza synchronizacja
+        # Pierwsza synchronizacja (poza asyncio, więc sync jest OK)
         logger.info("🔄 Pierwsza synchronizacja danych...")
         run_scraper()
-        build_ranking_content()  # warm up calculation on startup
         
         # Uruchom bota
         logger.info("🤖 Uruchamiam Discord bota...")

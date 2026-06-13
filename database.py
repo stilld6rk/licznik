@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Boolean, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, Float, Boolean, ForeignKey, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -14,7 +14,7 @@ class GuildMember(Base):
     
     id = Column(Integer, primary_key=True)
     nick = Column(String(100), unique=True, nullable=False)
-    discord_id = Column(Integer, nullable=True)
+    discord_id = Column(BigInteger, nullable=True)
     join_date = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     
@@ -54,7 +54,7 @@ class ManualCorrection(Base):
     date = Column(DateTime, nullable=False)
     week_start = Column(DateTime, nullable=False)
     comment = Column(Text, nullable=True)
-    set_by = Column(Integer, nullable=True)  # Discord ID admina co to ustawił
+    set_by = Column(BigInteger, nullable=True)  # Discord ID admina co to ustawił
     
     # Relacja
     recipient = relationship("GuildMember", back_populates="corrections")
@@ -91,6 +91,14 @@ class DebtCarryover(Base):
 def init_db():
     """Inicjalizuj tabelę"""
     Base.metadata.create_all(engine)
+    # Migrate integer discord_id columns to bigint if needed
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE guild_members ALTER COLUMN discord_id TYPE BIGINT"))
+            conn.execute(text("ALTER TABLE manual_corrections ALTER COLUMN set_by TYPE BIGINT"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
     print("✅ Baza danych zainicjalizowana")
 
 

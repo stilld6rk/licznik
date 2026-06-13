@@ -69,7 +69,13 @@ def scrape_hard_logs() -> list:
         page = context.new_page()
 
         try:
-            page.goto("https://projekt-hard.eu/", wait_until="networkidle", timeout=60000)
+            page.goto("https://projekt-hard.eu/", wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            logger.info(f"📄 Tytuł strony: {page.title()}")
+            logger.info(f"🔗 URL: {page.url}")
+
+            buttons = page.get_by_role("button").all()
+            logger.info(f"🔘 Przyciski na stronie: {[b.inner_text() for b in buttons]}")
 
             # Logowanie
             page.get_by_role("button", name="Zaloguj").click(timeout=60000)
@@ -122,6 +128,8 @@ def scrape_hard_logs() -> list:
         
         except Exception as e:
             logger.error(f"❌ Błąd podczas scrapowania: {e}")
+            logger.error(f"📄 Tytuł przy błędzie: {page.title()}")
+            logger.error(f"🔗 URL przy błędzie: {page.url}")
             browser.close()
             return []
 

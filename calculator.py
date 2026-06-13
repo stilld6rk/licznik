@@ -9,17 +9,31 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Obliczenia zaczynają się od tego tygodnia
+START_DATE = datetime(2026, 6, 2)  # poniedziałek tygodnia 02.06–08.06
+
 
 def get_current_week_start() -> datetime:
     now = datetime.now()
     return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def get_all_weeks_since_start() -> list:
+    """Zwróć listę wszystkich tygodni od START_DATE do dziś"""
+    weeks = []
+    week = START_DATE
+    current = get_current_week_start()
+    while week <= current:
+        weeks.append(week)
+        week += timedelta(days=7)
+    return weeks
+
+
 def calculate_week(week_start: datetime) -> dict:
     members = get_all_active_members()
     payments = get_payments_for_week(week_start)
     corrections = get_corrections_for_week(week_start)
-    logger.info(f"📅 Tydzień: {week_start.strftime('%d.%m.%Y')} | Wpłaty w DB: {payments} | Korekty: {list(corrections.keys())}")
+    logger.info(f"📅 Tydzień: {week_start.strftime('%d.%m.%Y')} | Wpłaty: {payments}")
 
     results = {}
     for nick in members:
@@ -50,7 +64,19 @@ def calculate_week(week_start: datetime) -> dict:
     return results
 
 
+def recalculate_all():
+    """Przelicz wszystkie tygodnie od START_DATE (buduje carryover chain)"""
+    weeks = get_all_weeks_since_start()
+    logger.info(f"🔄 Przeliczam {len(weeks)} tygodni od {START_DATE.strftime('%d.%m.%Y')}")
+    for week in weeks:
+        if not is_week_off(week):
+            calculate_week(week)
+
+
 def build_ranking_content() -> str:
+    # Najpierw przelicz wszystkie tygodnie żeby carryover był aktualny
+    recalculate_all()
+
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
     zakres = f"{week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}"

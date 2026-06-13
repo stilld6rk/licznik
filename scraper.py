@@ -12,8 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def clean_nick(nick):
-    """Oczyść nick z Version tagów"""
+def oczysc_nick_v(nick):
     if not nick:
         return nick
     return re.sub(r'[Vv]\d+$', '', str(nick)).strip()
@@ -42,7 +41,7 @@ def get_discord_members():
         username = user.get('username', '?')
 
         if str(ROLE_ID) in [str(r) for r in roles]:
-            nick = clean_nick(member.get('nick') or user.get('display_name') or username)
+            nick = oczysc_nick_v(member.get('nick') or user.get('display_name') or username)
             if nick:
                 if nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
                     nick = "SKUTY SZKIELET"
@@ -123,7 +122,7 @@ def scrape_hard_logs() -> list:
             df = df[~df['Nazwa członka'].str.contains('->', na=False)].copy()
             df['Nazwa członka'] = (
                 df['Nazwa członka']
-                .apply(clean_nick)
+                .apply(oczysc_nick_v)
                 .replace({'SKUTABABA': 'SKUTY SZKIELET', 'SKUTYSIURAS': 'SKUTY SZKIELET', 'ASPIRIN': 'SKUTY SZKIELET'})
             )
             

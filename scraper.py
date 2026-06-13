@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta
-from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, BOT_TOKEN, HEADLESS
+from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, DISCORD_BOT_TOKEN as BOT_TOKEN, HEADLESS
 from db_helper import get_or_create_member, add_payment, get_all_active_members
 import logging
 

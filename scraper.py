@@ -50,18 +50,22 @@ def scrape_hard_logs() -> list:
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_context().new_page()
-        
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+        )
+        context.set_default_timeout(60000)
+        page = context.new_page()
+
         try:
-            page.goto("https://projekt-hard.eu/")
-            
+            page.goto("https://projekt-hard.eu/", wait_until="networkidle", timeout=60000)
+
             # Logowanie
             page.get_by_role("button", name="Zaloguj").click()
             page.get_by_role("textbox", name="Login lub e-mail...").fill(HARD_LOGIN)
             page.get_by_role("textbox", name="Hasło...").fill(HARD_PASSWORD)
             page.get_by_role("textbox", name="Pin...").fill(HARD_PIN)
             page.get_by_role("button", name="Zaloguj się").click()
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
             
             # Otwórz Logi Gildii
             page.get_by_role("link", name="Logi Gildii").filter(visible=True).first.click()

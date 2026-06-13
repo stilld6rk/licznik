@@ -26,8 +26,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     logger.info(f"✅ Bot zalogowany jako {bot.user}")
     try:
-        await bot.tree.sync()
-        logger.info("✅ Slash commands zsynchronizowane")
+        guild = discord.Object(id=GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        logger.info(f"✅ Slash commands zsynchronizowane z guildem {GUILD_ID}")
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
 

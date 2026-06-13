@@ -33,10 +33,15 @@ async def on_ready():
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
 
+    # 1. Pobierz członków DC + zapisz logi → 2. Zaktualizuj ranking
+    import asyncio
+    loop = asyncio.get_event_loop()
+    logger.info("🔄 Startup: scraper → ranking")
+    await loop.run_in_executor(None, run_scraper)
+    await update_ranking()
+
     if not auto_scrape.is_running():
         auto_scrape.start()
-    if not daily_ranking_update.is_running():
-        daily_ranking_update.start()
 
 
 async def update_ranking():
@@ -68,17 +73,11 @@ async def update_ranking():
 
 @tasks.loop(hours=1)
 async def auto_scrape():
-    """Co godzinę scrapuj dane"""
+    """Co godzinę: 1. pobierz DC role members, 2. scrapuj logi, 3. zaktualizuj ranking"""
     logger.info("🔄 Auto-scraper uruchomiony")
     import asyncio
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_scraper)
-
-
-@tasks.loop(hours=24)
-async def daily_ranking_update():
-    """Co 24h aktualizuj przypiętą wiadomość rankingową"""
-    logger.info("📊 Dzienna aktualizacja rankingu")
     await update_ranking()
 
 
@@ -460,7 +459,9 @@ async def sync_scrape_command(interaction: discord.Interaction):
         )
         await interaction.followup.send(embed=embed)
         
-        run_scraper()
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_scraper)
         await update_ranking()
 
         embed = discord.Embed(

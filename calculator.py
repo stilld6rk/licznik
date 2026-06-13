@@ -19,6 +19,7 @@ def calculate_week(week_start: datetime) -> dict:
     members = get_all_active_members()
     payments = get_payments_for_week(week_start)
     corrections = get_corrections_for_week(week_start)
+    logger.info(f"📅 Tydzień: {week_start.strftime('%d.%m.%Y')} | Wpłaty w DB: {payments} | Korekty: {list(corrections.keys())}")
 
     results = {}
     for nick in members:

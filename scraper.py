@@ -142,6 +142,11 @@ def scrape_hard_logs() -> list:
             logger.info(f"❓ Nie pasują do DC: {sorted(unmatched)}")
 
             # Zapisuj WSZYSTKIE rekordy (nie filtruj po DC)
+            df['Tydzien'] = df['Data'].apply(
+                lambda x: (x - timedelta(days=x.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            )
+            tygodnie_w_danych = sorted(df['Tydzien'].unique())
+            logger.info(f"📅 Tygodnie w danych: {[t.strftime('%d.%m.%Y') for t in tygodnie_w_danych]}")
             logger.info(f"✅ Przetworzono {len(df)} wpisów łącznie")
             return df.to_dict('records')
         

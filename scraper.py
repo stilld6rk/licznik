@@ -51,8 +51,26 @@ def get_discord_members():
         else:
             logger.debug(f"  ⏭️  Brak roli: {username} (role: {roles})")
 
-    logger.info(f"📋 Znaleziono {len(members)} członków z rolą {ROLE_ID}")
-    return list(set(members))
+    current = list(set(members))
+    logger.info(f"📋 Znaleziono {len(current)} członków z rolą {ROLE_ID}")
+
+    # Wyczyść discord_id dla członków którzy utracili rolę
+    from database import get_session, GuildMember
+    session = get_session()
+    try:
+        old_with_role = session.query(GuildMember).filter(
+            GuildMember.discord_id.isnot(None)
+        ).all()
+        removed = [m for m in old_with_role if m.nick not in current]
+        for m in removed:
+            logger.info(f"  🔴 Utracił rolę, usuwam discord_id: {m.nick}")
+            m.discord_id = None
+        if removed:
+            session.commit()
+    finally:
+        session.close()
+
+    return current
 
 
 def scrape_hard_logs() -> list:

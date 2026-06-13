@@ -60,7 +60,7 @@ def scrape_hard_logs() -> list:
             page.goto("https://projekt-hard.eu/", wait_until="networkidle", timeout=60000)
 
             # Logowanie
-            page.get_by_role("button", name="Zaloguj").click()
+            page.get_by_role("button", name="Zaloguj").click(timeout=60000)
             page.get_by_role("textbox", name="Login lub e-mail...").fill(HARD_LOGIN)
             page.get_by_role("textbox", name="Hasło...").fill(HARD_PASSWORD)
             page.get_by_role("textbox", name="Pin...").fill(HARD_PIN)

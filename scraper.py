@@ -130,11 +130,19 @@ def scrape_hard_logs() -> list:
             df['Ilość'] = df['Przedmiot'].str.extract(r'(\d+)').astype(float).fillna(0)
             df['Data'] = pd.to_datetime(df['Data'], format='%H:%M %d.%m.%Y')
             
-            # Filtruj tylko członków gildii
-            valid_members = get_all_active_members()
-            df = df[df['Nazwa członka'].isin(valid_members)].copy()
-            
-            logger.info(f"✅ Przetworzono {len(df)} wpisów")
+            # Loguj unikalne nicki ze scrapera
+            scraped_nicks = set(df['Nazwa członka'].unique())
+            valid_members = set(get_all_active_members())
+
+            matched = scraped_nicks & valid_members
+            unmatched = scraped_nicks - valid_members
+
+            logger.info(f"📊 Nicki ze scrapera: {sorted(scraped_nicks)}")
+            logger.info(f"✅ Pasujące do DC: {sorted(matched)}")
+            logger.info(f"❓ Nie pasują do DC: {sorted(unmatched)}")
+
+            # Zapisuj WSZYSTKIE rekordy (nie filtruj po DC)
+            logger.info(f"✅ Przetworzono {len(df)} wpisów łącznie")
             return df.to_dict('records')
         
         except Exception as e:
@@ -146,19 +154,39 @@ def scrape_hard_logs() -> list:
 
 
 def save_scrape_to_db(records: list):
-    """Zapisz dane scrapowania do bazy"""
+    """Zapisz dane scrapowania do bazy (pomija duplikaty)"""
+    from database import get_session, Payment, GuildMember
+    saved = 0
+    skipped = 0
     for record in records:
         try:
-            add_payment(
-                nick=record['Nazwa członka'],
-                amount=int(record['Ilość']),
+            session = get_session()
+            member = session.query(GuildMember).filter_by(nick=record['Nazwa członka']).first()
+            if not member:
+                session.close()
+                skipped += 1
+                continue
+            # Sprawdź duplikat po member_id + date + amount
+            exists = session.query(Payment).filter_by(
+                member_id=member.id,
                 date=record['Data'],
-                item_name=record['Przedmiot']
-            )
+                amount=int(record['Ilość'])
+            ).first()
+            session.close()
+            if not exists:
+                add_payment(
+                    nick=record['Nazwa członka'],
+                    amount=int(record['Ilość']),
+                    date=record['Data'],
+                    item_name=record['Przedmiot']
+                )
+                saved += 1
+            else:
+                skipped += 1
         except Exception as e:
-            logger.error(f"❌ Błąd przy zapisie wpłaty: {e}")
-    
-    logger.info(f"✅ Zapisano {len(records)} wpłat do bazy")
+            logger.error(f"❌ Błąd przy zapisie wpłaty {record.get('Nazwa członka')}: {e}")
+
+    logger.info(f"✅ Zapisano {saved} nowych wpłat, pominięto {skipped} duplikatów/nieznanych")
 
 
 def run_scraper():

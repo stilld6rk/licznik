@@ -97,7 +97,7 @@ def scrape_hard_logs() -> list:
             page.wait_for_timeout(3000)
             
             # Otwórz Logi Gildii
-            page.get_by_role("link", name="Logi Gildii").filter(visible=True).first.click()
+            page.get_by_role("link", name="Logi Gildii").first.click()
             page.get_by_label("Pokaż 102550100 pozycji", exact=True).select_option("100")
             page.wait_for_selector("#guild_logs_table")
             

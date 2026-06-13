@@ -264,3 +264,31 @@ def get_all_weeks() -> list:
         return sorted([w[0] for w in weeks if w[0]], reverse=True)
     finally:
         session.close()
+
+
+_PINNED_SENTINEL = datetime(1970, 1, 1)
+
+
+def get_pinned_message_id() -> str | None:
+    """Pobierz ID przypiętej wiadomości rankingowej"""
+    session = get_session()
+    try:
+        msg = session.query(WeeklyMessage).filter_by(week_start=_PINNED_SENTINEL).first()
+        return msg.message_id if msg else None
+    finally:
+        session.close()
+
+
+def save_pinned_message_id(message_id: str):
+    """Zapisz ID przypiętej wiadomości rankingowej"""
+    session = get_session()
+    try:
+        msg = session.query(WeeklyMessage).filter_by(week_start=_PINNED_SENTINEL).first()
+        if msg:
+            msg.message_id = message_id
+        else:
+            msg = WeeklyMessage(week_start=_PINNED_SENTINEL, message_id=message_id)
+            session.add(msg)
+        session.commit()
+    finally:
+        session.close()

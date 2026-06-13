@@ -7,14 +7,13 @@ from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week
 )
-from calculator import run_week_calc_and_send
+from calculator import run_week_calc_and_send, update_pinned_ranking
 from scraper import run_scraper
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Intent i command prefix
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -30,10 +29,11 @@ async def on_ready():
         logger.info("✅ Slash commands zsynchronizowane")
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
-    
-    # Uruchom scheduled tasks
+
     if not auto_scrape.is_running():
         auto_scrape.start()
+    if not daily_ranking_update.is_running():
+        daily_ranking_update.start()
 
 
 @tasks.loop(hours=1)
@@ -41,6 +41,13 @@ async def auto_scrape():
     """Co godzinę scrapuj dane"""
     logger.info("🔄 Auto-scraper uruchomiony")
     run_scraper()
+
+
+@tasks.loop(hours=24)
+async def daily_ranking_update():
+    """Co 24h aktualizuj przypiętą wiadomość rankingową"""
+    logger.info("📊 Dzienna aktualizacja rankingu")
+    update_pinned_ranking()
 
 
 @bot.tree.command(name="wpłata_ręczna", description="Dodaj ręczną wpłatę: KTO → ZA KOGO, ILE, POWÓD")
@@ -362,6 +369,27 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
         )
 
 
+@bot.tree.command(name="aktualizuj", description="[ADMIN] Ręcznie zaktualizuj przypiętą wiadomość rankingową")
+async def aktualizuj_command(interaction: discord.Interaction):
+    """Ręczna aktualizacja przypiętej wiadomości rankingowej"""
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "❌ Tylko admini mogą to robić",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        update_pinned_ranking()
+        await interaction.followup.send("✅ Ranking zaktualizowany!", ephemeral=True)
+        logger.info(f"📊 Ręczna aktualizacja przez {interaction.user.name}")
+
+    except Exception as e:
+        logger.error(f"❌ Błąd aktualizuj: {e}")
+        await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+
+
 @bot.tree.command(name="sync_scrape", description="Ręcznie uruchom scraper (admin)")
 async def sync_scrape_command(interaction: discord.Interaction):
     """Ręczne uruchomienie scrapera"""
@@ -383,15 +411,10 @@ async def sync_scrape_command(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         
         run_scraper()
-        
-        # Zaktualizuj rankingi
-        from db_helper import get_all_weeks
-        weeks = get_all_weeks()
-        for week_start in weeks[-4:]:  # Ostatnie 4 tygodnie
-            run_week_calc_and_send(week_start)
-        
+        update_pinned_ranking()
+
         embed = discord.Embed(
-            title="✅ Scraper ukończony",
+            title="✅ Scraper ukończony i ranking zaktualizowany",
             color=discord.Color.green()
         )
         await interaction.followup.send(embed=embed)

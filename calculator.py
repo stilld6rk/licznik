@@ -137,15 +137,14 @@ def build_ranking_content() -> str:
 
     for nick, dane in posortowani:
         ilosc_raw = dane['ilosc_raw']
-        przen_z = dane['przeniesienie_z']
         wyswietlana = dane['ilosc_wyswietlana']
-        efektywna = ilosc_raw + przen_z
 
-        # Suffix z długiem/nadpłatą z POPRZEDNIEGO tygodnia
-        if przen_z > 0:
-            suffix = f" *(+{int(przen_z)} z poprz. tyg.)*"
-        elif przen_z < 0:
-            suffix = f" *({int(przen_z)} dług)*"
+        # Suffix pokazuje co PRZECHODZI na kolejny tydzień (nie skąd przyszło)
+        przen_na = dane['przeniesienie_na']
+        if przen_na > 0:
+            suffix = f" *(→ +{int(przen_na)} nadpłata)*"
+        elif przen_na < 0:
+            suffix = f" *(→ {int(przen_na)} dług)*"
         else:
             suffix = ""
 

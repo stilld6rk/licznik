@@ -162,7 +162,7 @@ def build_ranking_content() -> str:
 
     lines = [
         f"╔══ 💎 **RANKING GEM** ══╗",
-        f"📅 {week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}  •  Cel: **{LIMIT} 💎/tydzień**",
+        f"📅 {week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}",
         "",
     ]
 

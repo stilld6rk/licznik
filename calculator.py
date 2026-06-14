@@ -30,9 +30,11 @@ def get_weeks_since_start() -> list:
 def _get_all_member_info() -> dict:
     """Batch fetch wszystkich info o członkach {nick: info}"""
     from database import get_session, GuildMember
+    from config import GUILD_ID
     session = get_session()
     try:
         members = session.query(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None)
         ).all()

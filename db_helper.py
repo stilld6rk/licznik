@@ -1,17 +1,17 @@
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover
+from config import GUILD_ID
 from datetime import datetime, timedelta
-import re
+
+_PINNED_SENTINEL = datetime(1970, 1, 1)
 
 
 def get_or_create_member(nick: str, discord_id: int = None) -> GuildMember:
-    """Pobrań lub stwórz członka"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if not member:
-            member = GuildMember(nick=nick, discord_id=discord_id)
+            member = GuildMember(guild_id=GUILD_ID, nick=nick, discord_id=discord_id)
             session.add(member)
             session.commit()
         elif discord_id and not member.discord_id:
@@ -23,10 +23,10 @@ def get_or_create_member(nick: str, discord_id: int = None) -> GuildMember:
 
 
 def get_all_active_members() -> list:
-    """Zwróć aktywnych członków z rolą Discord (discord_id ustawione)"""
     session = get_session()
     try:
         members = session.query(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None)
         ).all()
@@ -36,10 +36,9 @@ def get_all_active_members() -> list:
 
 
 def _update_discord_nick(nick: str, discord_nick: str):
-    """Zaktualizuj wyświetlany nick z Discord"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if member and member.discord_nick != discord_nick:
             member.discord_nick = discord_nick
             session.commit()
@@ -48,10 +47,9 @@ def _update_discord_nick(nick: str, discord_nick: str):
 
 
 def update_member_join_date(nick: str, join_date: datetime, force: bool = False):
-    """Aktualizuj datę dołączenia (force=True pozwala na zmianę istniejącej daty)"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if member:
             if not member.join_date or force:
                 member.join_date = join_date
@@ -63,10 +61,9 @@ def update_member_join_date(nick: str, join_date: datetime, force: bool = False)
 
 
 def get_member_info(nick: str):
-    """Pobierz informacje o członku"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if member:
             return {
                 'nick': member.nick,
@@ -81,41 +78,26 @@ def get_member_info(nick: str):
 
 
 def add_payment(nick: str, amount: float, date: datetime, item_name: str = None):
-    """Dodaj wpłatę"""
     session = get_session()
     try:
         member = get_or_create_member(nick)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        payment = Payment(
-            member_id=member.id,
-            amount=amount,
-            date=date,
-            item_name=item_name,
-            week_start=week_start
-        )
+        payment = Payment(member_id=member.id, amount=amount, date=date, item_name=item_name, week_start=week_start)
         session.add(payment)
         session.commit()
     finally:
         session.close()
 
 
-def add_manual_correction(recipient_nick: str, amount: float, date: datetime, 
-                         payer: str = None, comment: str = None, set_by: int = None):
-    """Dodaj ręczną korektę"""
+def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
+                          payer: str = None, comment: str = None, set_by: int = None):
     session = get_session()
     try:
         recipient = get_or_create_member(recipient_nick)
-        week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0)
-        
+        week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
-            recipient_id=recipient.id,
-            payer=payer,
-            amount=amount,
-            date=date,
-            week_start=week_start,
-            comment=comment,
-            set_by=set_by
+            recipient_id=recipient.id, payer=payer, amount=amount,
+            date=date, week_start=week_start, comment=comment, set_by=set_by
         )
         session.add(correction)
         session.commit()
@@ -123,145 +105,52 @@ def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
         session.close()
 
 
-def get_payments_for_week(week_start: datetime) -> dict:
-    """Zwróć słownik {nick: total_amount} dla danego tygodnia"""
-    session = get_session()
-    try:
-        results = session.query(
-            GuildMember.nick,
-            func.sum(Payment.amount).label('total')
-        ).join(Payment).filter(
-            Payment.week_start == week_start
-        ).group_by(GuildMember.nick).all()
-        
-        return {nick: total or 0 for nick, total in results}
-    finally:
-        session.close()
-
-
 def get_corrections_for_week(week_start: datetime) -> dict:
-    """Zwróć słownik {nick: list_of_corrections} dla danego tygodnia"""
     session = get_session()
     try:
-        corrections = session.query(ManualCorrection).filter(
+        corrections = session.query(ManualCorrection).join(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID,
             ManualCorrection.week_start == week_start
         ).all()
-        
         result = {}
         for corr in corrections:
             nick = corr.recipient.nick
-            if nick not in result:
-                result[nick] = []
-            result[nick].append(corr)
-        
+            result.setdefault(nick, []).append(corr)
         return result
     finally:
         session.close()
 
 
-def get_carryover_debt(member_nick: str, week_start: datetime) -> float:
-    """Zwróć przeniesiony dług z poprzedniego tygodnia"""
-    session = get_session()
-    try:
-        member = session.query(GuildMember).filter_by(nick=member_nick).first()
-        if not member:
-            return 0
-        
-        carryover = session.query(DebtCarryover).filter(
-            DebtCarryover.member_id == member.id,
-            DebtCarryover.week_start == week_start
-        ).first()
-        
-        return carryover.amount if carryover else 0
-    finally:
-        session.close()
-
-
-def set_carryover_debt(member_nick: str, week_start: datetime, amount: float):
-    """Ustawić przeniesiony dług"""
-    session = get_session()
-    try:
-        member = get_or_create_member(member_nick)
-        
-        carryover = session.query(DebtCarryover).filter(
-            DebtCarryover.member_id == member.id,
-            DebtCarryover.week_start == week_start
-        ).first()
-        
-        if carryover:
-            carryover.amount = amount
-        else:
-            carryover = DebtCarryover(
-                member_id=member.id,
-                week_start=week_start,
-                amount=amount
-            )
-            session.add(carryover)
-        
-        session.commit()
-    finally:
-        session.close()
-
-
-def save_weekly_message(week_start: datetime, message_id: str):
-    """Zapisz ID wiadomości Discord dla tygodnia"""
-    session = get_session()
-    try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=week_start).first()
-        
-        if msg:
-            msg.message_id = message_id
-        else:
-            msg = WeeklyMessage(week_start=week_start, message_id=message_id)
-            session.add(msg)
-        
-        session.commit()
-    finally:
-        session.close()
-
-
-def get_weekly_message(week_start: datetime) -> str:
-    """Pobierz ID wiadomości Discord dla tygodnia"""
-    session = get_session()
-    try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=week_start).first()
-        return msg.message_id if msg else None
-    finally:
-        session.close()
-
-
 def set_week_off(week_start: datetime, is_off: bool = True):
-    """Ustaw/usuń tydzień jako wyłączony"""
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=week_start).first()
-        
+        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=week_start).first()
         if msg:
             msg.is_off = is_off
         else:
-            msg = WeeklyMessage(week_start=week_start, is_off=is_off)
+            msg = WeeklyMessage(guild_id=GUILD_ID, week_start=week_start, is_off=is_off)
             session.add(msg)
-        
         session.commit()
     finally:
         session.close()
 
 
 def is_week_off(week_start: datetime) -> bool:
-    """Sprawdź czy tydzień wyłączony"""
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=week_start).first()
+        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=week_start).first()
         return msg.is_off if msg else False
     finally:
         session.close()
 
 
 def delete_correction(correction_id: int):
-    """Usuń korektę"""
     session = get_session()
     try:
-        corr = session.query(ManualCorrection).filter_by(id=correction_id).first()
+        corr = session.query(ManualCorrection).join(GuildMember).filter(
+            ManualCorrection.id == correction_id,
+            GuildMember.guild_id == GUILD_ID
+        ).first()
         if corr:
             session.delete(corr)
             session.commit()
@@ -272,54 +161,49 @@ def delete_correction(correction_id: int):
 
 
 def get_all_payments_grouped() -> dict:
-    """Zwróć wszystkie wpłaty pogrupowane {week_start: {nick: total}}"""
     session = get_session()
     try:
         results = session.query(
             Payment.week_start,
             GuildMember.nick,
             func.sum(Payment.amount).label('total')
-        ).join(GuildMember).group_by(Payment.week_start, GuildMember.nick).all()
+        ).join(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID
+        ).group_by(Payment.week_start, GuildMember.nick).all()
 
         grouped = {}
         for week_start, nick, total in results:
             ws = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
-            if ws not in grouped:
-                grouped[ws] = {}
-            grouped[ws][nick] = float(total or 0)
+            grouped.setdefault(ws, {})[nick] = float(total or 0)
         return grouped
     finally:
         session.close()
 
 
 def get_all_corrections_grouped() -> dict:
-    """Zwróć wszystkie korekty pogrupowane {week_start: {nick: total}}"""
     session = get_session()
     try:
-        results = session.query(ManualCorrection).all()
+        results = session.query(ManualCorrection).join(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID
+        ).all()
         grouped = {}
         for corr in results:
             ws = corr.week_start.replace(hour=0, minute=0, second=0, microsecond=0)
             nick = corr.recipient.nick
-            if ws not in grouped:
-                grouped[ws] = {}
-            grouped[ws][nick] = grouped[ws].get(nick, 0) + float(corr.amount)
+            grouped.setdefault(ws, {})[nick] = grouped.get(ws, {}).get(nick, 0) + float(corr.amount)
         return grouped
     finally:
         session.close()
 
 
 def get_all_logs_for_nick(nick: str) -> dict:
-    """Zwróć wszystkie wpłaty i korekty dla gracza {payments: [...], corrections: [...]}"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if not member:
             return None
-
         payments = session.query(Payment).filter_by(member_id=member.id).order_by(Payment.date.desc()).all()
         corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
-
         return {
             'nick': member.nick,
             'discord_nick': member.discord_nick or member.nick,
@@ -331,10 +215,9 @@ def get_all_logs_for_nick(nick: str) -> dict:
 
 
 def get_corrections_for_nick(nick: str) -> list:
-    """Zwróć wszystkie korekty dla gracza z ID [{id, date, amount, payer, comment, week_start}]"""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
         if not member:
             return []
         corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
@@ -347,7 +230,6 @@ def get_corrections_for_nick(nick: str) -> list:
 
 
 def update_correction(correction_id: int, amount: float = None, comment: str = None) -> bool:
-    """Edytuj kwotę i/lub komentarz korekty"""
     session = get_session()
     try:
         corr = session.query(ManualCorrection).filter_by(id=correction_id).first()
@@ -364,52 +246,35 @@ def update_correction(correction_id: int, amount: float = None, comment: str = N
 
 
 def get_corrections_with_comments(week_start: datetime) -> dict:
-    """Zwróć korekty z komentarzami dla tygodnia {nick: [(amount, comment)]}"""
     session = get_session()
     try:
-        results = session.query(ManualCorrection).filter(
+        results = session.query(ManualCorrection).join(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID,
             ManualCorrection.week_start == week_start,
             ManualCorrection.comment.isnot(None)
         ).all()
         grouped = {}
         for corr in results:
             nick = corr.recipient.nick
-            if nick not in grouped:
-                grouped[nick] = []
-            grouped[nick].append((int(corr.amount), corr.comment))
+            grouped.setdefault(nick, []).append((int(corr.amount), corr.comment))
         return grouped
     finally:
         session.close()
 
 
-def get_all_weeks() -> list:
-    """Pobierz wszystkie tygodnie z danymi"""
-    session = get_session()
-    try:
-        weeks = session.query(func.distinct(Payment.week_start)).all()
-        return sorted([w[0] for w in weeks if w[0]], reverse=True)
-    finally:
-        session.close()
-
-
-_PINNED_SENTINEL = datetime(1970, 1, 1)
-
-
 def get_pinned_message_id() -> str | None:
-    """Pobierz ID przypiętej wiadomości rankingowej"""
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=_PINNED_SENTINEL).first()
+        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL).first()
         return msg.message_id if msg else None
     finally:
         session.close()
 
 
 def save_pinned_message_id(message_id: str | None):
-    """Zapisz ID przypiętej wiadomości rankingowej (None = reset)"""
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(week_start=_PINNED_SENTINEL).first()
+        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL).first()
         if message_id is None:
             if msg:
                 session.delete(msg)
@@ -417,7 +282,7 @@ def save_pinned_message_id(message_id: str | None):
             if msg:
                 msg.message_id = message_id
             else:
-                msg = WeeklyMessage(week_start=_PINNED_SENTINEL, message_id=message_id)
+                msg = WeeklyMessage(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL, message_id=message_id)
                 session.add(msg)
         session.commit()
     finally:

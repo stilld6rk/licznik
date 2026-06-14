@@ -398,7 +398,7 @@ async def ustaw_dolaczenie_command(interaction: discord.Interaction, nick: str, 
         await interaction.response.defer(ephemeral=True)
 
         from db_helper import update_member_join_date
-        update_member_join_date(nick, join_date, guild_id=interaction.guild_id)
+        update_member_join_date(nick, join_date, force=True, guild_id=interaction.guild_id)
 
         embed = discord.Embed(title="✅ Data dołączenia ustawiona", color=discord.Color.blue(), timestamp=datetime.now())
         embed.add_field(name="🔹 Gracz", value=f"**{nick}**", inline=False)

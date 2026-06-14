@@ -330,6 +330,39 @@ def get_all_logs_for_nick(nick: str) -> dict:
         session.close()
 
 
+def get_corrections_for_nick(nick: str) -> list:
+    """Zwróć wszystkie korekty dla gracza z ID [{id, date, amount, payer, comment, week_start}]"""
+    session = get_session()
+    try:
+        member = session.query(GuildMember).filter_by(nick=nick).first()
+        if not member:
+            return []
+        corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
+        return [
+            {'id': c.id, 'date': c.date, 'amount': c.amount, 'payer': c.payer, 'comment': c.comment, 'week_start': c.week_start}
+            for c in corrections
+        ]
+    finally:
+        session.close()
+
+
+def update_correction(correction_id: int, amount: float = None, comment: str = None) -> bool:
+    """Edytuj kwotę i/lub komentarz korekty"""
+    session = get_session()
+    try:
+        corr = session.query(ManualCorrection).filter_by(id=correction_id).first()
+        if not corr:
+            return False
+        if amount is not None:
+            corr.amount = amount
+        if comment is not None:
+            corr.comment = comment if comment.strip() else None
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
 def get_corrections_with_comments(week_start: datetime) -> dict:
     """Zwróć korekty z komentarzami dla tygodnia {nick: [(amount, comment)]}"""
     session = get_session()

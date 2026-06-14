@@ -6,7 +6,7 @@ from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, GOLD, OR
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week,
-    get_all_logs_for_nick
+    get_all_logs_for_nick, get_corrections_for_nick, update_correction
 )
 from calculator import run_week_calc_and_send, build_ranking_content
 from db_helper import get_pinned_message_id, save_pinned_message_id
@@ -512,6 +512,116 @@ async def historia_command(interaction: discord.Interaction, nick: str):
 
     except Exception as e:
         logger.error(f"❌ Błąd historia: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="lista_wpłat", description="[ADMIN] Pokaż ręczne wpłaty gracza z ID do edycji/usunięcia")
+@app_commands.describe(nick="Nick gracza")
+async def lista_wplat_command(interaction: discord.Interaction, nick: str):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        corrections = get_corrections_for_nick(nick.strip())
+
+        if not corrections:
+            await interaction.followup.send(f"❌ Brak ręcznych wpłat dla: **{nick}**", ephemeral=True)
+            return
+
+        lines = []
+        for c in corrections:
+            line = f"`ID:{c['id']}` `{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+            if c['payer']:
+                line += f" od {c['payer']}"
+            if c['comment']:
+                line += f" — *{c['comment']}*"
+            lines.append(line)
+
+        embed = discord.Embed(
+            title=f"✍️ Wpłaty ręczne: {nick}",
+            description="\n".join(lines),
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text="Użyj /usuń_wpłatę <ID> lub /edytuj_wpłatę <ID>")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"❌ Błąd lista_wpłat: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="usuń_wpłatę", description="[ADMIN] Usuń ręczną wpłatę po ID")
+@app_commands.describe(id="ID wpłaty (widoczne w /lista_wpłat)")
+async def usun_wplate_command(interaction: discord.Interaction, id: int):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        ok = delete_correction(id)
+        if not ok:
+            await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
+            return
+
+        await update_ranking()
+        await interaction.followup.send(f"✅ Usunięto wpłatę ID:{id} i zaktualizowano ranking.", ephemeral=True)
+        logger.info(f"🗑️ Usunięto korektę ID:{id} przez {interaction.user.name}")
+
+    except Exception as e:
+        logger.error(f"❌ Błąd usuń_wpłatę: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="edytuj_wpłatę", description="[ADMIN] Edytuj kwotę lub komentarz ręcznej wpłaty po ID")
+@app_commands.describe(
+    id="ID wpłaty (widoczne w /lista_wpłat)",
+    kwota="Nowa kwota w 💎 (zostaw puste aby nie zmieniać)",
+    komentarz="Nowy komentarz (zostaw puste aby nie zmieniać, wpisz '-' aby usunąć)"
+)
+async def edytuj_wplate_command(interaction: discord.Interaction, id: int, kwota: int = None, komentarz: str = None):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        if kwota is None and komentarz is None:
+            await interaction.response.send_message("❌ Podaj kwotę lub komentarz do zmiany", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        new_comment = None if komentarz == "-" else komentarz
+        ok = update_correction(id, amount=kwota, comment=new_comment if komentarz is not None else None)
+        if not ok:
+            await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
+            return
+
+        await update_ranking()
+
+        changes = []
+        if kwota is not None:
+            changes.append(f"kwota → **{kwota}💎**")
+        if komentarz is not None:
+            changes.append(f"komentarz → *{new_comment or '(usunięty)'}*")
+
+        await interaction.followup.send(f"✅ Zaktualizowano wpłatę ID:{id}: {', '.join(changes)}", ephemeral=True)
+        logger.info(f"✏️ Edytowano korektę ID:{id} przez {interaction.user.name}: {changes}")
+
+    except Exception as e:
+        logger.error(f"❌ Błąd edytuj_wpłatę: {e}")
         try:
             await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
         except Exception:

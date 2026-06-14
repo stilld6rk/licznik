@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
-    is_week_off, set_week_off, delete_correction, get_corrections_for_week
+    is_week_off, set_week_off, delete_correction, get_corrections_for_week,
+    get_all_logs_for_nick
 )
 from calculator import run_week_calc_and_send, build_ranking_content
 from db_helper import get_pinned_message_id, save_pinned_message_id
@@ -452,6 +453,69 @@ async def members_command(interaction: discord.Interaction):
             f"❌ Błąd: {str(e)}",
             ephemeral=True
         )
+
+
+@bot.tree.command(name="historia", description="Pokaż historię wpłat dla gracza")
+@app_commands.describe(nick="Nick gracza (z gry lub Discord)")
+async def historia_command(interaction: discord.Interaction, nick: str):
+    try:
+        await interaction.response.defer(ephemeral=True)
+
+        data = get_all_logs_for_nick(nick.strip())
+        if not data:
+            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"📜 Historia wpłat: {data['discord_nick']}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+
+        # Ręczne korekty
+        if data['corrections']:
+            lines = []
+            for c in data['corrections']:
+                line = f"`{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+                if c['payer']:
+                    line += f" od {c['payer']}"
+                if c['comment']:
+                    line += f" — *{c['comment']}*"
+                lines.append(line)
+            embed.add_field(
+                name=f"✍️ Wpłaty ręczne ({len(data['corrections'])})",
+                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                inline=False
+            )
+        else:
+            embed.add_field(name="✍️ Wpłaty ręczne", value="*Brak*", inline=False)
+
+        # Wpłaty ze scrapera — grupuj per tydzień
+        if data['payments']:
+            from collections import defaultdict
+            by_week = defaultdict(float)
+            for p in data['payments']:
+                by_week[p['week_start']] += p['amount']
+            lines = [
+                f"`{ws.strftime('%d.%m.%Y')}` **{int(total)}💎**"
+                for ws, total in sorted(by_week.items(), reverse=True)
+            ]
+            embed.add_field(
+                name=f"🎮 Wpłaty z gry ({len(by_week)} tygodni, łącznie {int(sum(by_week.values()))}💎)",
+                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                inline=False
+            )
+        else:
+            embed.add_field(name="🎮 Wpłaty z gry", value="*Brak*", inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"❌ Błąd historia: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
 
 
 def run_bot():

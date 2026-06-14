@@ -309,6 +309,27 @@ def get_all_corrections_grouped() -> dict:
         session.close()
 
 
+def get_all_logs_for_nick(nick: str) -> dict:
+    """Zwróć wszystkie wpłaty i korekty dla gracza {payments: [...], corrections: [...]}"""
+    session = get_session()
+    try:
+        member = session.query(GuildMember).filter_by(nick=nick).first()
+        if not member:
+            return None
+
+        payments = session.query(Payment).filter_by(member_id=member.id).order_by(Payment.date.desc()).all()
+        corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
+
+        return {
+            'nick': member.nick,
+            'discord_nick': member.discord_nick or member.nick,
+            'payments': [{'date': p.date, 'amount': p.amount, 'item': p.item_name, 'week_start': p.week_start} for p in payments],
+            'corrections': [{'date': c.date, 'amount': c.amount, 'payer': c.payer, 'comment': c.comment, 'week_start': c.week_start} for c in corrections],
+        }
+    finally:
+        session.close()
+
+
 def get_corrections_with_comments(week_start: datetime) -> dict:
     """Zwróć korekty z komentarzami dla tygodnia {nick: [(amount, comment)]}"""
     session = get_session()

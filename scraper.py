@@ -129,10 +129,17 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             page.get_by_role("textbox", name="Pin...").fill(_pin)
             page.get_by_role("button", name="Zaloguj się").click()
             page.wait_for_timeout(3000)
+            logger.info(f"📄 Po logowaniu — tytuł: {page.title()}, URL: {page.url}")
 
             page.get_by_role("link", name="Logi Gildii").first.click()
-            page.get_by_label("Pokaż 102550100 pozycji", exact=True).select_option("100")
-            page.wait_for_selector("#guild_logs_table")
+            page.wait_for_selector("#guild_logs_table", timeout=30000)
+            # DataTables "show N entries" select — use name attribute, not label text
+            length_select = page.locator("select[name='guild_logs_table_length']")
+            if length_select.count() > 0:
+                length_select.select_option("100")
+                page.wait_for_timeout(1000)
+            else:
+                logger.warning("⚠️  Nie znaleziono selektora ilości wierszy, kontynuuję bez zmiany")
 
             all_frames = []
             while True:

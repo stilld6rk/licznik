@@ -91,7 +91,7 @@ class HistoriaModal(discord.ui.Modal, title="Historia wpłat"):
         if data['corrections']:
             lines = []
             for c in data['corrections']:
-                line = f"`{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+                line = f"`{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
                 if c['payer']:
                     line += f" od {c['payer']}"
                 if c['comment']:
@@ -524,7 +524,7 @@ async def historia_command(interaction: discord.Interaction, nick: str):
         if data['corrections']:
             lines = []
             for c in data['corrections']:
-                line = f"`{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+                line = f"`{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
                 if c['payer']:
                     line += f" od {c['payer']}"
                 if c['comment']:
@@ -638,7 +638,7 @@ async def lista_wplat_command(interaction: discord.Interaction, nick: str):
 
         lines = []
         for c in corrections:
-            line = f"`ID:{c['id']}` `{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+            line = f"`ID:{c['id']}` `{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
             if c['payer']:
                 line += f" od {c['payer']}"
             if c['comment']:

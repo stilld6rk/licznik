@@ -272,7 +272,9 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
         for corr in results:
             ws = corr.week_start.replace(hour=0, minute=0, second=0, microsecond=0)
             nick = corr.recipient.nick
-            grouped.setdefault(ws, {})[nick] = grouped.get(ws, {}).get(nick, 0) + float(corr.amount)
+            if ws not in grouped:
+                grouped[ws] = {}
+            grouped[ws][nick] = grouped[ws].get(nick, 0) + float(corr.amount)
         return grouped
     finally:
         session.close()

@@ -336,8 +336,8 @@ async def wpata_reczna_command(
             await interaction.response.send_message("❌ Tylko admini mogą dodawać ręczne wpłaty", ephemeral=True)
             return
 
-        if amount < 1 or amount > 1000:
-            await interaction.response.send_message("❌ Ilość musi być między 1 a 1000", ephemeral=True)
+        if amount == 0 or amount < -1000 or amount > 1000:
+            await interaction.response.send_message("❌ Ilość musi być między -1000 a 1000 (nie 0)", ephemeral=True)
             return
 
         payer = payer.strip() if payer else None
@@ -362,7 +362,11 @@ async def wpata_reczna_command(
         await update_ranking(interaction.guild_id)
 
         cfg = _get_cfg(interaction.guild_id)
-        embed = discord.Embed(title="✅ Wpłata ręczna dodana", color=discord.Color.green(), timestamp=datetime.now())
+        embed = discord.Embed(
+            title="✅ Wpłata ręczna dodana" if amount > 0 else "✅ Wypłata ręczna dodana",
+            color=discord.Color.green() if amount > 0 else discord.Color.red(),
+            timestamp=datetime.now()
+        )
         embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
         if payer:
             embed.add_field(name="🔹 KTO", value=f"**{payer}**", inline=False)

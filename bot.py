@@ -245,12 +245,13 @@ async def auto_scrape():
 
 @bot.tree.command(name="setup_gildii", description="[ADMIN SERWERA] Skonfiguruj licznik dla tej gildii")
 @app_commands.describe(
-    nazwa="Nazwa gildii (np. SKUTERSI) — musi pasować do zmiennych env NAZWA_HARD_LOGIN itd.",
+    nazwa="Wyświetlana nazwa gildii (np. SKUTA EKIPA)",
     kanal_id="ID kanału rankingowego (skopiuj z ustawień kanału)",
     rola_id="ID roli wymaganej do śledzenia (gracze gildii)",
     admin_rola_id="ID roli adminów (opcjonalne)",
     member_rola_id="ID roli członków — mogą używać /historia (opcjonalne)",
     limit="Tygodniowy limit GEMów (domyślnie 4)",
+    env_klucz="Klucz env vars (np. DZIKUSY → DZIKUSY_HARD_LOGIN). Domyślnie: nazwa gildii.",
 )
 async def setup_gildii_command(
     interaction: discord.Interaction,
@@ -260,6 +261,7 @@ async def setup_gildii_command(
     admin_rola_id: str = "0",
     member_rola_id: str = "0",
     limit: int = 4,
+    env_klucz: str = None,
 ):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Tylko Administrator serwera może konfigurować bota.", ephemeral=True)
@@ -289,6 +291,7 @@ async def setup_gildii_command(
         admin_role_id=admin_rid,
         member_role_id=member_rid,
         limit=limit,
+        env_key=env_klucz or nazwa,
     )
     logger.info(f"⚙️  Setup guildu {interaction.guild_id} ({nazwa}) przez {interaction.user.name}")
 
@@ -297,7 +300,7 @@ async def setup_gildii_command(
     from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db, _creds_for_guild
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, get_discord_members, interaction.guild_id, role_id)
-    creds = _creds_for_guild(nazwa)
+    creds = _creds_for_guild(env_klucz or nazwa)
     records = await loop.run_in_executor(None, scrape_hard_logs, *creds)
     if records:
         await loop.run_in_executor(None, save_scrape_to_db, records, interaction.guild_id)

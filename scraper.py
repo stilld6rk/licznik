@@ -78,13 +78,14 @@ def get_discord_members(guild_id: int = None, role_id: int = None):
     return current
 
 
-def _creds_for_guild(guild_name: str) -> tuple:
-    """Zwróć (login, password, pin) dla danej gildii z env vars lub domyślne."""
+def _creds_for_guild(env_key: str) -> tuple:
+    """Zwróć (login, password, pin) z env vars używając env_key jako prefiksu."""
     import os
-    key = guild_name.upper().replace(" ", "_").replace("-", "_")
+    key = env_key.upper().replace(" ", "_").replace("-", "_")
     login    = os.getenv(f"{key}_HARD_LOGIN")    or HARD_LOGIN
     password = os.getenv(f"{key}_HARD_PASSWORD") or HARD_PASSWORD
     pin      = os.getenv(f"{key}_HARD_PIN")      or HARD_PIN
+    logger.info(f"🔑 Kredencjały dla klucza '{key}': login={login}")
     return login, password, pin
 
 
@@ -230,7 +231,7 @@ def run_scraper():
         logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({cfg.guild_id})")
         get_discord_members(cfg.guild_id, cfg.role_id)
 
-        creds = _creds_for_guild(cfg.guild_name)
+        creds = _creds_for_guild(cfg.env_key or cfg.guild_name)
         if creds not in seen_creds:
             logger.info(f"🌐 Scrapuję logi dla konta: {creds[0]} ({cfg.guild_name})")
             seen_creds[creds] = scrape_hard_logs(*creds) or []

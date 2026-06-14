@@ -24,7 +24,7 @@ def get_all_active_guild_configs() -> list:
 
 def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
                       role_id: int, admin_role_id: int = 0, member_role_id: int = 0,
-                      limit: int = 4):
+                      limit: int = 4, env_key: str = None):
     session = get_session()
     try:
         cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
@@ -35,6 +35,7 @@ def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
             cfg.admin_role_id = admin_role_id
             cfg.member_role_id = member_role_id
             cfg.limit = limit
+            cfg.env_key = env_key or guild_name
             cfg.is_active = True
         else:
             cfg = GuildConfig(
@@ -42,6 +43,7 @@ def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
                 ranking_channel_id=ranking_channel_id,
                 role_id=role_id, admin_role_id=admin_role_id,
                 member_role_id=member_role_id, limit=limit,
+                env_key=env_key or guild_name,
             )
             session.add(cfg)
         session.commit()

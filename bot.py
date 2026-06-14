@@ -109,84 +109,52 @@ async def wpata_reczna_command(
     KTO → ZA KOGO, ILE 💎, POWÓD
     """
     try:
-        # Sprawdzenie uprawnień (admin)
         if not is_admin(interaction):
-            await interaction.response.send_message(
-                "❌ Tylko admini mogą dodawać ręczne wpłaty",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Tylko admini mogą dodawać ręczne wpłaty", ephemeral=True)
             return
-        
-        # Sprawdzenie ilości
-        if amount < 1 or amount > 10:
-            await interaction.response.send_message(
-                "❌ Ilość musi być między 1 a 10 💎",
-                ephemeral=True
-            )
+
+        if amount < 1 or amount > 1000:
+            await interaction.response.send_message("❌ Ilość musi być większa niż 0", ephemeral=True)
             return
-        
-        # Sanitize nicknames
+
         payer = payer.strip() if payer else None
         recipient = recipient.strip()
-        
         if not recipient:
-            await interaction.response.send_message(
-                "❌ Musisz podać nazwę odbiorcy",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Musisz podać nazwę odbiorcy", ephemeral=True)
             return
-        
-        # Dodaj wpłatę
+
+        # Defer immediately — update_ranking() takes >3s
+        await interaction.response.defer(ephemeral=True)
+
         add_manual_correction(
             recipient_nick=recipient,
             amount=amount,
             date=datetime.now(),
-            payer=payer if payer else None,
+            payer=payer,
             comment=reason,
             set_by=interaction.user.id
         )
-        
-        logger.info(f"💳 {payer} → {recipient}: {amount}💎 ({reason})")
-        
+        logger.info(f"💳 {payer or '?'} → {recipient}: {amount}💎 ({reason})")
+
         await update_ranking()
-        
-        # Embed potwierdzenia
-        embed = discord.Embed(
-            title="✅ Wpłata ręczna dodana",
-            color=discord.Color.green(),
-            timestamp=datetime.now()
-        )
-        embed.add_field(
-            name="🔹 KTO", 
-            value=f"**{payer}**", 
-            inline=False
-        )
-        embed.add_field(
-            name="🔹 ZA KOGO", 
-            value=f"**{recipient}**", 
-            inline=False
-        )
-        embed.add_field(
-            name="🔹 ILE", 
-            value=f"**{amount} 💎**", 
-            inline=False
-        )
+
+        embed = discord.Embed(title="✅ Wpłata ręczna dodana", color=discord.Color.green(), timestamp=datetime.now())
+        if payer:
+            embed.add_field(name="🔹 KTO", value=f"**{payer}**", inline=False)
+        embed.add_field(name="🔹 ZA KOGO", value=f"**{recipient}**", inline=False)
+        embed.add_field(name="🔹 ILE", value=f"**{amount} 💎**", inline=False)
         if reason:
-            embed.add_field(
-                name="🔹 POWÓD", 
-                value=f"*{reason}*", 
-                inline=False
-            )
+            embed.add_field(name="🔹 POWÓD", value=f"*{reason}*", inline=False)
         embed.set_footer(text=f"Ustawił: {interaction.user.name}")
-        
-        await interaction.response.send_message(embed=embed)
-        
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     except Exception as e:
         logger.error(f"❌ Błąd komendy wpłaty_ręcznej: {e}")
-        await interaction.response.send_message(
-            f"❌ Błąd: {str(e)}",
-            ephemeral=True
-        )
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.tree.command(name="ustaw_dołączenie", description="[ADMIN] Ustaw datę dołączenia członka")
@@ -204,52 +172,34 @@ async def ustaw_dolaczenie_command(
     Wpłaty będą liczone od tego tygodnia.
     """
     try:
-        # Sprawdzenie uprawnień
         if not is_admin(interaction):
-            await interaction.response.send_message(
-                "❌ Tylko admini mogą to ustawiać",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Tylko admini mogą to ustawiać", ephemeral=True)
             return
-        
-        # Parse daty
+
         try:
             join_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
-            await interaction.response.send_message(
-                "❌ Zły format daty! Użyj: YYYY-MM-DD (np. 2024-01-15)",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Zły format daty! Użyj: YYYY-MM-DD (np. 2024-01-15)", ephemeral=True)
             return
-        
-        # Ustaw datę
+
+        await interaction.response.defer(ephemeral=True)
+
         from db_helper import update_member_join_date
         update_member_join_date(nick, join_date)
-        
         logger.info(f"📅 {nick} dołączył: {join_date.strftime('%d.%m.%Y')}")
-        
-        embed = discord.Embed(
-            title="✅ Data dołączenia ustawiona",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
-        )
+
+        embed = discord.Embed(title="✅ Data dołączenia ustawiona", color=discord.Color.blue(), timestamp=datetime.now())
         embed.add_field(name="🔹 Gracz", value=f"**{nick}**", inline=False)
         embed.add_field(name="📅 Dołączył", value=f"**{join_date.strftime('%d.%m.%Y')}**", inline=False)
-        embed.add_field(
-            name="ℹ️ Info", 
-            value="Wpłaty będą liczone od tego tygodnia", 
-            inline=False
-        )
         embed.set_footer(text=f"Ustawił: {interaction.user.name}")
-        
-        await interaction.response.send_message(embed=embed)
-        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     except Exception as e:
         logger.error(f"❌ Błąd ustaw_dołączenie: {e}")
-        await interaction.response.send_message(
-            f"❌ Błąd: {str(e)}",
-            ephemeral=True
-        )
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.tree.command(name="info_członka", description="Pokaż informacje o członku (data dołączenia, wpłaty)")
@@ -380,31 +330,27 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
     try:
         # Sprawdzenie uprawnień
         if not is_admin(interaction):
-            await interaction.response.send_message(
-                "❌ Tylko admini mogą to robić",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
             return
-        
+
+        await interaction.response.defer(ephemeral=True)
         week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).replace(hour=0, minute=0, second=0)
         set_week_off(week_start, is_off)
-        
         status = "wyłączony" if is_off else "włączony"
         embed = discord.Embed(
             title=f"✅ Tydzień {status}",
             description=f"{week_start.strftime('%d.%m')} - {(week_start + timedelta(days=6)).strftime('%d.%m')}",
             color=discord.Color.orange()
         )
-        
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"⏭️  Tydzień ustawiony na {status}")
-        
+
     except Exception as e:
         logger.error(f"❌ Błąd komendy week_off: {e}")
-        await interaction.response.send_message(
-            f"❌ Błąd: {str(e)}",
-            ephemeral=True
-        )
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.tree.command(name="init_ranking", description="[ADMIN] Wyślij ranking po raz pierwszy na kanał")

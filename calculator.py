@@ -163,8 +163,6 @@ def build_ranking_content() -> str:
             ikona = "○"
 
         lines.append(f"{ikona} {display}: {efektywna}💎 {detail}")
-        for amt, comment in comments_map.get(nick, []):
-            lines.append(f"   +{amt}💎 - {comment}")
 
     footer = f"\n🕐 Ostatnia aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     content = "\n".join(lines)

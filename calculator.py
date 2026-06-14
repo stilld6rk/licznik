@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from config import LIMIT
 from db_helper import (
     get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
-    is_week_off
+    get_corrections_with_comments, is_week_off
 )
 import logging
 
@@ -121,6 +121,7 @@ def build_ranking_content() -> str:
 
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
+    comments_map = get_corrections_with_comments(week_start)
 
     wyniki_tygodnia = wyniki.get(week_start, {})
 
@@ -160,6 +161,8 @@ def build_ranking_content() -> str:
             ikona = "○"
 
         lines.append(f"{ikona} {display}: {efektywna}💎 {detail}")
+        for amt, comment in comments_map.get(nick, []):
+            lines.append(f"   +{amt}💎 - {comment}")
 
     content = "\n".join(lines)
     if len(content) > 2000:

@@ -90,10 +90,10 @@ async def auto_scrape():
 )
 async def wpata_reczna_command(
     interaction: discord.Interaction,
-    payer: str,
     recipient: str,
     amount: int,
-    reason: str = None
+    reason: str = None,
+    payer: str = None,
 ):
     """
     Dodaj ręczną wpłatę w formacie:
@@ -117,7 +117,7 @@ async def wpata_reczna_command(
             return
         
         # Sanitize nicknames
-        payer = payer.strip()
+        payer = payer.strip() if payer else None
         recipient = recipient.strip()
         
         if not recipient:

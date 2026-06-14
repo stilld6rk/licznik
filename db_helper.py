@@ -309,6 +309,25 @@ def get_all_corrections_grouped() -> dict:
         session.close()
 
 
+def get_corrections_with_comments(week_start: datetime) -> dict:
+    """Zwróć korekty z komentarzami dla tygodnia {nick: [(amount, comment)]}"""
+    session = get_session()
+    try:
+        results = session.query(ManualCorrection).filter(
+            ManualCorrection.week_start == week_start,
+            ManualCorrection.comment.isnot(None)
+        ).all()
+        grouped = {}
+        for corr in results:
+            nick = corr.recipient.nick
+            if nick not in grouped:
+                grouped[nick] = []
+            grouped[nick].append((int(corr.amount), corr.comment))
+        return grouped
+    finally:
+        session.close()
+
+
 def get_all_weeks() -> list:
     """Pobierz wszystkie tygodnie z danymi"""
     session = get_session()

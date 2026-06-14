@@ -17,14 +17,18 @@ def get_current_week_start() -> datetime:
     return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def get_weeks_since_start() -> list:
+def get_weeks_since(start: datetime) -> list:
     weeks = []
-    week = START_DATE
+    week = start
     current = get_current_week_start()
     while week <= current:
         weeks.append(week)
         week += timedelta(days=7)
     return weeks
+
+
+def get_weeks_since_start() -> list:
+    return get_weeks_since(START_DATE)
 
 
 def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
@@ -45,7 +49,16 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
             val += corrections_grouped.get(ws, {}).get(nick, 0)
             rankingi_per_tydzien[ws][nick] = val
 
-    tygodnie_posortowane = get_weeks_since_start()
+    # Wyznacz tygodnie — zaczyn od najwcześniejszej daty dołączenia lub START_DATE
+    def _join_week(nick):
+        info = member_info_map.get(nick)
+        if info and info.get('join_date'):
+            jd = info['join_date']
+            return (jd - timedelta(days=jd.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        return START_DATE
+
+    earliest = min((_join_week(n) for n in lista_dc), default=START_DATE)
+    tygodnie_posortowane = get_weeks_since(min(earliest, START_DATE))
     aktywne = [t for t in tygodnie_posortowane if not is_week_off(t, gid)]
 
     przeniesienia = {nick: 0 for nick in lista_dc}
@@ -56,14 +69,9 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
         wyniki[tydzien] = {}
 
         for nick in lista_dc:
-            member_info = member_info_map.get(nick)
-            if member_info and member_info['join_date']:
-                join_date = member_info['join_date']
-                start_week = (join_date - timedelta(days=join_date.weekday())).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-                if tydzien < start_week:
-                    continue
+            member_start = _join_week(nick)
+            if tydzien < member_start:
+                continue
 
             wplata_raw = ranking_dict.get(nick, 0)
             przen = przeniesienia[nick]

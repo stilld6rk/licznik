@@ -116,12 +116,16 @@ async def on_ready():
     logger.info(f"✅ Bot zalogowany jako {bot.user}")
     bot.add_view(RankingView())  # persistent view — survives restarts
 
-    # Sync commands first — before any slow operations
+    # Sync commands — clear stale guild commands then re-register fresh
     try:
         guild = discord.Object(id=GUILD_ID)
-        bot.tree.copy_global_to(guild=guild)
+        # Wipe old guild-specific registrations first
+        bot.tree.clear_commands(guild=guild)
         await bot.tree.sync(guild=guild)
-        logger.info(f"✅ Slash commands zsynchronizowane z guildem {GUILD_ID}")
+        # Re-register all commands
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        logger.info(f"✅ Zsynchronizowano {len(synced)} komend z guildem {GUILD_ID}")
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
 

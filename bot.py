@@ -280,7 +280,13 @@ async def setup_gildii_command(
     )
     logger.info(f"⚙️  Setup guildu {interaction.guild_id} ({nazwa}) przez {interaction.user.name}")
 
-    # Wyślij ranking od razu
+    # Pobierz członków z Discord od razu — bez tego ranking byłby pusty
+    import asyncio
+    from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, get_discord_members, interaction.guild_id, role_id)
+
+    # Wyślij ranking z aktualnymi członkami
     await update_ranking(interaction.guild_id)
 
     embed = discord.Embed(title="✅ Gildia skonfigurowana!", color=discord.Color.green(), timestamp=datetime.now())

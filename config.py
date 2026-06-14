@@ -8,6 +8,7 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 ROLE_ID = int(os.getenv("ROLE_ID", "0"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
+MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # legacy, unused
 RANKING_CHANNEL_ID = int(os.getenv("RANKING_CHANNEL_ID", "0"))
 

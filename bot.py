@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timedelta
-from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
+from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, MEMBER_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week,
@@ -26,10 +26,12 @@ def is_admin(interaction: discord.Interaction) -> bool:
 
 
 def is_member(interaction: discord.Interaction) -> bool:
-    """Sprawdź czy użytkownik ma rolę gildii (ROLE_ID) lub jest adminem"""
+    """Sprawdź czy użytkownik ma rolę gildii (MEMBER_ROLE_ID) lub jest adminem"""
     if is_admin(interaction):
         return True
-    return any(r.id == ROLE_ID for r in interaction.user.roles)
+    if MEMBER_ROLE_ID:
+        return any(r.id == MEMBER_ROLE_ID for r in interaction.user.roles)
+    return False
 
 
 intents = discord.Intents.default()

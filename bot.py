@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timedelta
-from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, MEMBER_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
+from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, MEMBER_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID, GUILD_NAME
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week,
@@ -150,9 +150,10 @@ async def update_ranking():
     import asyncio
     loop = asyncio.get_event_loop()
     content = await loop.run_in_executor(None, build_ranking_content)
-    msg_id = get_pinned_message_id()
-
     view = RankingView()
+
+    # 1. Try stored message ID from DB
+    msg_id = get_pinned_message_id()
     if msg_id:
         try:
             msg = await channel.fetch_message(int(msg_id))
@@ -160,9 +161,21 @@ async def update_ranking():
             logger.info(f"✏️  Zaktualizowano wiadomość {msg_id}")
             return
         except discord.NotFound:
-            logger.warning("⚠️  Stara wiadomość usunięta, tworzę nową")
+            logger.warning("⚠️  Stara wiadomość usunięta, szukam w historii...")
             save_pinned_message_id(None)
 
+    # 2. Scan last 50 messages in channel for bot's own message
+    try:
+        async for msg in channel.history(limit=50):
+            if msg.author == bot.user:
+                await msg.edit(content=content, view=view)
+                save_pinned_message_id(str(msg.id))
+                logger.info(f"🔍 Znaleziono istniejącą wiadomość {msg.id} w historii")
+                return
+    except Exception as e:
+        logger.warning(f"⚠️  Błąd skanowania historii: {e}")
+
+    # 3. Send new message
     new_msg = await channel.send(content, view=view)
     save_pinned_message_id(str(new_msg.id))
     logger.info(f"📤 Wysłano nową wiadomość {new_msg.id}")
@@ -455,8 +468,12 @@ async def init_ranking_command(interaction: discord.Interaction):
 
         save_pinned_message_id(None)
         await update_ranking()
-        await interaction.followup.send("✅ Ranking wysłany na kanał webhooka!", ephemeral=True)
-        logger.info(f"📌 Init ranking przez {interaction.user.name}")
+        embed = discord.Embed(title="✅ Ranking zainicjalizowany", color=discord.Color.green(), timestamp=datetime.now())
+        embed.add_field(name="🏰 Gildia", value=f"**{GUILD_NAME}**", inline=True)
+        embed.add_field(name="📢 Kanał", value=f"<#{RANKING_CHANNEL_ID}>", inline=True)
+        embed.set_footer(text=f"Przez: {interaction.user.name}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        logger.info(f"📌 Init ranking przez {interaction.user.name} dla {GUILD_NAME}")
 
     except Exception as e:
         logger.error(f"❌ Błąd init_ranking: {e}")
@@ -476,8 +493,12 @@ async def aktualizuj_command(interaction: discord.Interaction):
 
         await interaction.response.defer(ephemeral=True)
         await update_ranking()
-        await interaction.followup.send("✅ Ranking zaktualizowany!", ephemeral=True)
-        logger.info(f"📊 Ręczna aktualizacja przez {interaction.user.name}")
+        embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
+        embed.add_field(name="🏰 Gildia", value=f"**{GUILD_NAME}**", inline=True)
+        embed.add_field(name="📢 Kanał", value=f"<#{RANKING_CHANNEL_ID}>", inline=True)
+        embed.set_footer(text=f"Przez: {interaction.user.name}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        logger.info(f"📊 Ręczna aktualizacja przez {interaction.user.name} dla {GUILD_NAME}")
 
     except Exception as e:
         logger.error(f"❌ Błąd aktualizuj: {e}")
@@ -508,10 +529,13 @@ async def sync_scrape_command(interaction: discord.Interaction):
         await loop.run_in_executor(None, run_scraper)
         await update_ranking()
 
-        await msg.edit(embed=discord.Embed(title="✅ Scraper ukończony i ranking zaktualizowany", color=discord.Color.green()))
+        done_embed = discord.Embed(title="✅ Scraper ukończony", color=discord.Color.green(), timestamp=datetime.now())
+        done_embed.add_field(name="🏰 Gildia", value=f"**{GUILD_NAME}**", inline=True)
+        done_embed.add_field(name="📢 Kanał", value=f"<#{RANKING_CHANNEL_ID}>", inline=True)
+        await msg.edit(embed=done_embed)
         await asyncio.sleep(60)
         await msg.delete()
-        logger.info("✅ Ręczny scraper uruchomiony")
+        logger.info(f"✅ Ręczny scraper ukończony dla {GUILD_NAME}")
         
     except Exception as e:
         logger.error(f"❌ Błąd sync_scrape: {e}")

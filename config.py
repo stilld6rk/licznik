@@ -11,6 +11,7 @@ ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # legacy, unused
 RANKING_CHANNEL_ID = int(os.getenv("RANKING_CHANNEL_ID", "0"))
+GUILD_NAME = os.getenv("GUILD_NAME", "Gildia")
 
 # Projekt Hard
 HARD_LOGIN = os.getenv("HARD_LOGIN")

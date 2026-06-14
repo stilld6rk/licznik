@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from config import LIMIT
+from config import LIMIT, GUILD_NAME
 from db_helper import (
     get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
     get_corrections_with_comments, is_week_off
@@ -129,7 +129,7 @@ def build_ranking_content() -> str:
 
     if not wyniki_tygodnia:
         zakres = f"{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}"
-        return f"💎 RANKING TYGODNIOWY ({zakres})\n\nBrak danych."
+        return f"💎 RANKING TYGODNIOWY — {GUILD_NAME} ({zakres})\n\nBrak danych."
 
     posortowani = sorted(
         wyniki_tygodnia.items(),
@@ -139,7 +139,7 @@ def build_ranking_content() -> str:
 
     medals = ["🥇", "🥈", "🥉"]
     medal_idx = 0
-    lines = [f"💎 RANKING TYGODNIOWY ({week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')})"]
+    lines = [f"💎 RANKING TYGODNIOWY — {GUILD_NAME} ({week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')})"]
 
     for nick, dane in posortowani:
         ilosc_raw = int(dane['ilosc_raw'])
@@ -148,9 +148,9 @@ def build_ranking_content() -> str:
         display = member_info_map.get(nick, {}).get('discord_nick', nick)
 
         if przen_z > 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | Nadpłata za poprzedni tydzień +{przen_z})"
         elif przen_z < 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | Niedopłata za poprzedni tydzień {przen_z})"
         else:
             detail = f"(wpłacono {ilosc_raw}💎)"
 
@@ -166,12 +166,14 @@ def build_ranking_content() -> str:
         for amt, comment in comments_map.get(nick, []):
             lines.append(f"   +{amt}💎 - {comment}")
 
+    footer = f"\n🕐 Ostatnia aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     content = "\n".join(lines)
-    if len(content) > 2000:
-        cutoff = content.rfind("\n", 0, 1970)
+    max_len = 2000 - len(footer)
+    if len(content) > max_len:
+        cutoff = content.rfind("\n", 0, max_len - 30)
         remaining = content[cutoff:].count("\n")
         content = content[:cutoff] + f"\n*... i {remaining} więcej*"
-    return content
+    return content + footer
 
 
 # backward compat

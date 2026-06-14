@@ -131,25 +131,30 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             page.wait_for_timeout(3000)
             logger.info(f"📄 Po logowaniu — tytuł: {page.title()}, URL: {page.url}")
 
-            page.get_by_role("link", name="Logi Gildii").filter(visible=True).last.click()
-            page.wait_for_selector("#guild_logs_table", timeout=30000)
-            try:
-                page.get_by_label("Pokaż 102550100 pozycji", exact=True).select_option("100")
-            except Exception:
-                length_select = page.locator("select[name='guild_logs_table_length']")
-                if length_select.count() > 0:
-                    length_select.select_option("100")
-                else:
-                    logger.warning("⚠️  Nie znaleziono selektora ilości wierszy")
-            page.wait_for_timeout(1000)
+            # Kliknij przycisk "Logi Gildii" dla postaci w gildii (nie disabled)
+            guild_btn = page.locator("#guild_logs:not(.disabled):not([disabled])")
+            guild_btn.last.click()
+
+            # Czekaj na otwarcie modala i załadowanie wierszy przez AJAX/DataTables
+            page.wait_for_selector("#guild_logs_modal.show", timeout=30000)
+            page.wait_for_selector("#guild_logs_table tbody tr", state="attached", timeout=15000)
+            page.wait_for_timeout(500)
+
+            # Ustaw 100 wierszy na stronę
+            length_select = page.locator("select[name='guild_logs_table_length']")
+            if length_select.count() > 0:
+                length_select.select_option("100")
+                page.wait_for_timeout(700)
 
             all_frames = []
             while True:
+                page.wait_for_selector("#guild_logs_table tbody tr", state="attached", timeout=10000)
                 html = page.inner_html("#guild_logs_table")
                 all_frames.append(pd.read_html(io.StringIO(f"<table>{html}</table>"))[0])
 
                 next_btn = page.locator("#guild_logs_table_next")
-                if "disabled" not in (next_btn.get_attribute("class") or ""):
+                classes = next_btn.get_attribute("class") or ""
+                if "disabled" not in classes:
                     next_btn.locator("a").click()
                     page.wait_for_timeout(700)
                 else:

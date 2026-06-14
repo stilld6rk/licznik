@@ -148,9 +148,9 @@ def build_ranking_content() -> str:
         display = member_info_map.get(nick, {}).get('discord_nick', nick)
 
         if przen_z > 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | Nadpłata za poprzedni tydzień +{przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
         elif przen_z < 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | Niedopłata za poprzedni tydzień {przen_z})"
+            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
         else:
             detail = f"(wpłacono {ilosc_raw}💎)"
 

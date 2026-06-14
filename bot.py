@@ -152,14 +152,8 @@ async def on_ready():
     bot.add_view(RankingView())
 
     try:
-        # Sync commands to all guilds the bot is in
-        for guild in bot.guilds:
-            g = discord.Object(id=guild.id)
-            bot.tree.clear_commands(guild=g)
-            await bot.tree.sync(guild=g)
-            bot.tree.copy_global_to(guild=g)
-            synced = await bot.tree.sync(guild=g)
-            logger.info(f"✅ Zsynchronizowano {len(synced)} komend z guildem {guild.name} ({guild.id})")
+        synced = await bot.tree.sync()
+        logger.info(f"✅ Zsynchronizowano {len(synced)} komend globalnie")
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
 

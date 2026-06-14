@@ -233,7 +233,7 @@ async def auto_scrape():
 
 @bot.tree.command(name="setup_gildii", description="[ADMIN SERWERA] Skonfiguruj licznik dla tej gildii")
 @app_commands.describe(
-    nazwa="Nazwa gildii (np. SKUTERSI)",
+    nazwa="Nazwa gildii (np. SKUTERSI) — musi pasować do zmiennych env NAZWA_HARD_LOGIN itd.",
     kanal_id="ID kanału rankingowego (skopiuj z ustawień kanału)",
     rola_id="ID roli wymaganej do śledzenia (gracze gildii)",
     admin_rola_id="ID roli adminów (opcjonalne)",
@@ -280,12 +280,13 @@ async def setup_gildii_command(
     )
     logger.info(f"⚙️  Setup guildu {interaction.guild_id} ({nazwa}) przez {interaction.user.name}")
 
-    # Pobierz członków + scrapuj wpłaty od razu
+    # Pobierz członków + scrapuj wpłaty od razu używając kredencjałów z env vars
     import asyncio
-    from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db
+    from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db, _creds_for_guild
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, get_discord_members, interaction.guild_id, role_id)
-    records = await loop.run_in_executor(None, scrape_hard_logs)
+    creds = _creds_for_guild(nazwa)
+    records = await loop.run_in_executor(None, scrape_hard_logs, *creds)
     if records:
         await loop.run_in_executor(None, save_scrape_to_db, records, interaction.guild_id)
 

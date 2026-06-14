@@ -113,7 +113,6 @@ def init_db():
             # Drop old unique constraints that don't include guild_id
             "ALTER TABLE guild_members DROP CONSTRAINT IF EXISTS guild_members_nick_key",
             "ALTER TABLE weekly_messages DROP CONSTRAINT IF EXISTS weekly_messages_week_start_key",
-            # guild_configs table is created by SQLAlchemy above; add pinned_message_id if missing
             "ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS pinned_message_id VARCHAR(50)",
         ]
         for sql in migrations:

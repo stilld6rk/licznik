@@ -78,8 +78,21 @@ def get_discord_members(guild_id: int = None, role_id: int = None):
     return current
 
 
-def scrape_hard_logs() -> list:
-    """Scrapuj logi z Projekt Hard (jeden raz dla wszystkich gildii)"""
+def _creds_for_guild(guild_name: str) -> tuple:
+    """Zwróć (login, password, pin) dla danej gildii z env vars lub domyślne."""
+    import os
+    key = guild_name.upper().replace(" ", "_").replace("-", "_")
+    login    = os.getenv(f"{key}_HARD_LOGIN")    or HARD_LOGIN
+    password = os.getenv(f"{key}_HARD_PASSWORD") or HARD_PASSWORD
+    pin      = os.getenv(f"{key}_HARD_PIN")      or HARD_PIN
+    return login, password, pin
+
+
+def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -> list:
+    """Scrapuj logi z Projekt Hard"""
+    _login = login or HARD_LOGIN
+    _password = password or HARD_PASSWORD
+    _pin = pin or HARD_PIN
     logger.info("🌐 Łączę się z Projekt Hard...")
 
     with sync_playwright() as p:
@@ -110,9 +123,9 @@ def scrape_hard_logs() -> list:
             logger.info(f"🔘 Przyciski na stronie: {[b.inner_text() for b in buttons]}")
 
             page.get_by_role("button", name="Zaloguj").click(timeout=60000)
-            page.get_by_role("textbox", name="Login lub e-mail...").fill(HARD_LOGIN)
-            page.get_by_role("textbox", name="Hasło...").fill(HARD_PASSWORD)
-            page.get_by_role("textbox", name="Pin...").fill(HARD_PIN)
+            page.get_by_role("textbox", name="Login lub e-mail...").fill(_login)
+            page.get_by_role("textbox", name="Hasło...").fill(_password)
+            page.get_by_role("textbox", name="Pin...").fill(_pin)
             page.get_by_role("button", name="Zaloguj się").click()
             page.wait_for_timeout(3000)
 
@@ -198,12 +211,11 @@ def save_scrape_to_db(records: list, guild_id: int = None):
 
 
 def run_scraper():
-    """Scrapuj raz, zapisz do każdego aktywnego guildu"""
+    """Scrapuj logi dla każdego aktywnego guildu (osobne kredencjały jeśli różne konta)"""
     logger.info("🚀 Uruchamiam scraper...")
 
     configs = get_all_active_guild_configs()
     if not configs:
-        # Fallback: tryb legacy z env vars
         logger.info("⚠️  Brak konfiguracji w DB, używam zmiennych środowiskowych")
         get_discord_members(GUILD_ID, ROLE_ID)
         records = scrape_hard_logs()
@@ -212,21 +224,21 @@ def run_scraper():
         logger.info("✅ Scraper ukończony (tryb legacy)")
         return
 
-    # Zaktualizuj członków dla każdego guildu
+    # Jedno logowanie na unikalny zestaw kredencjałów
+    seen_creds = {}  # (login, password, pin) → records
     for cfg in configs:
         logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({cfg.guild_id})")
         get_discord_members(cfg.guild_id, cfg.role_id)
 
-    # Scrapuj logi raz
-    records = scrape_hard_logs()
-    if not records:
-        logger.info("✅ Scraper ukończony (brak danych)")
-        return
+        creds = _creds_for_guild(cfg.guild_name)
+        if creds not in seen_creds:
+            logger.info(f"🌐 Scrapuję logi dla konta: {creds[0]} ({cfg.guild_name})")
+            seen_creds[creds] = scrape_hard_logs(*creds) or []
 
-    # Zapisz dla każdego guildu
-    for cfg in configs:
-        logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
-        save_scrape_to_db(records, cfg.guild_id)
+        records = seen_creds[creds]
+        if records:
+            logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
+            save_scrape_to_db(records, cfg.guild_id)
 
     logger.info("✅ Scraper ukończony")
 

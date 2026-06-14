@@ -5,7 +5,7 @@ import requests
 from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta
 from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, DISCORD_BOT_TOKEN as BOT_TOKEN, HEADLESS
-from db_helper import get_or_create_member, add_payment, get_all_active_members
+from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -41,13 +41,16 @@ def get_discord_members():
         username = user.get('username', '?')
 
         if str(ROLE_ID) in [str(r) for r in roles]:
-            nick = oczysc_nick_v(member.get('nick') or user.get('display_name') or username)
-            if nick:
-                if nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
-                    nick = "SKUTY SZKIELET"
-                get_or_create_member(nick, user.get('id'))
-                members.append(nick)
-                logger.info(f"  ✅ Znaleziono członka z rolą: {nick}")
+            dc_nick = oczysc_nick_v(member.get('nick') or user.get('display_name') or username)
+            if dc_nick:
+                game_nick = dc_nick
+                if game_nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
+                    game_nick = "SKUTY SZKIELET"
+                m = get_or_create_member(game_nick, user.get('id'))
+                # Zawsze aktualizuj discord_nick z aktualnego DC
+                _update_discord_nick(game_nick, dc_nick)
+                members.append(game_nick)
+                logger.info(f"  ✅ Znaleziono członka z rolą: {dc_nick}")
         else:
             logger.debug(f"  ⏭️  Brak roli: {username} (role: {roles})")
 

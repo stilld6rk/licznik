@@ -13,7 +13,8 @@ class GuildMember(Base):
     __tablename__ = "guild_members"
     
     id = Column(Integer, primary_key=True)
-    nick = Column(String(100), unique=True, nullable=False)
+    nick = Column(String(100), unique=True, nullable=False)  # nick z gry (do matchowania)
+    discord_nick = Column(String(100), nullable=True)        # nick z DC (do wyświetlania)
     discord_id = Column(BigInteger, nullable=True)
     join_date = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -96,6 +97,11 @@ def init_db():
         try:
             conn.execute(text("ALTER TABLE guild_members ALTER COLUMN discord_id TYPE BIGINT"))
             conn.execute(text("ALTER TABLE manual_corrections ALTER COLUMN set_by TYPE BIGINT"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            conn.execute(text("ALTER TABLE guild_members ADD COLUMN IF NOT EXISTS discord_nick VARCHAR(100)"))
             conn.commit()
         except Exception:
             conn.rollback()

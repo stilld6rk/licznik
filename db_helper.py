@@ -35,6 +35,18 @@ def get_all_active_members() -> list:
         session.close()
 
 
+def _update_discord_nick(nick: str, discord_nick: str):
+    """Zaktualizuj wyświetlany nick z Discord"""
+    session = get_session()
+    try:
+        member = session.query(GuildMember).filter_by(nick=nick).first()
+        if member and member.discord_nick != discord_nick:
+            member.discord_nick = discord_nick
+            session.commit()
+    finally:
+        session.close()
+
+
 def update_member_join_date(nick: str, join_date: datetime, force: bool = False):
     """Aktualizuj datę dołączenia (force=True pozwala na zmianę istniejącej daty)"""
     session = get_session()

@@ -39,7 +39,7 @@ def _get_all_member_info() -> dict:
         return {
             m.nick: {
                 'join_date': m.join_date,
-                'discord_id': m.discord_id,
+                'discord_nick': m.discord_nick or m.nick,
             }
             for m in members
         }
@@ -113,11 +113,11 @@ def oblicz_zaleglosci() -> tuple:
 
         logger.info(f"📅 {tydzien.strftime('%d.%m.%Y')} | ranking_dict: {ranking_dict}")
 
-    return wyniki, aktywne
+    return wyniki, aktywne, member_info_map
 
 
 def build_ranking_content() -> str:
-    wyniki, aktywne = oblicz_zaleglosci()
+    wyniki, aktywne, member_info_map = oblicz_zaleglosci()
 
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
@@ -142,6 +142,7 @@ def build_ranking_content() -> str:
         ilosc_raw = int(dane['ilosc_raw'])
         przen_z = int(dane['przeniesienie_z'])
         efektywna = ilosc_raw + przen_z
+        display = member_info_map.get(nick, {}).get('discord_nick', nick)
 
         if przen_z > 0:
             detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
@@ -158,7 +159,7 @@ def build_ranking_content() -> str:
         else:
             ikona = "○"
 
-        lines.append(f"{ikona} {nick}: {efektywna}💎 {detail}")
+        lines.append(f"{ikona} {display}: {efektywna}💎 {detail}")
 
     content = "\n".join(lines)
     if len(content) > 2000:

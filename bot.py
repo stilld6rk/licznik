@@ -25,6 +25,13 @@ def is_admin(interaction: discord.Interaction) -> bool:
     return False
 
 
+def is_member(interaction: discord.Interaction) -> bool:
+    """Sprawdź czy użytkownik ma rolę gildii (ROLE_ID) lub jest adminem"""
+    if is_admin(interaction):
+        return True
+    return any(r.id == ROLE_ID for r in interaction.user.roles)
+
+
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -267,8 +274,10 @@ async def info_czlonka_command(
 @bot.tree.command(name="zaległości", description="Pokaż zaległości dla członka w tym tygodniu")
 @app_commands.describe(member="Nazwa członka (opcjonalnie)")
 async def zaleglosci_command(interaction: discord.Interaction, member: str = None):
-    """Pokaż zaległości"""
     try:
+        if not is_member(interaction):
+            await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
+            return
         week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).replace(hour=0, minute=0, second=0)
         
         if member:
@@ -436,8 +445,10 @@ async def sync_scrape_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="members", description="Lista wszystkich członków")
 async def members_command(interaction: discord.Interaction):
-    """Pokaż listę członków"""
     try:
+        if not is_member(interaction):
+            await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
+            return
         members = get_all_active_members()
         
         embed = discord.Embed(
@@ -461,6 +472,9 @@ async def members_command(interaction: discord.Interaction):
 @app_commands.describe(nick="Nick gracza (z gry lub Discord)")
 async def historia_command(interaction: discord.Interaction, nick: str):
     try:
+        if not is_member(interaction):
+            await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
 
         data = get_all_logs_for_nick(nick.strip())

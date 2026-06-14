@@ -35,6 +35,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     logger.info(f"✅ Bot zalogowany jako {bot.user}")
+
+    # Sync commands first — before any slow operations
     try:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.copy_global_to(guild=guild)
@@ -43,7 +45,7 @@ async def on_ready():
     except Exception as e:
         logger.error(f"❌ Błąd synchronizacji: {e}")
 
-    # 1. Pobierz członków DC + zapisz logi → 2. Zaktualizuj ranking
+    # Then scrape + update ranking in background so commands are already live
     import asyncio
     loop = asyncio.get_event_loop()
     logger.info("🔄 Startup: scraper → ranking")

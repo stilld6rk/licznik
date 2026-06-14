@@ -135,6 +135,18 @@ class RankingView(discord.ui.View):
 
 
 @bot.event
+async def on_guild_join(guild: discord.Guild):
+    """Sync commands when bot joins a new server."""
+    try:
+        g = discord.Object(id=guild.id)
+        bot.tree.copy_global_to(guild=g)
+        synced = await bot.tree.sync(guild=g)
+        logger.info(f"✅ Nowy serwer {guild.name} ({guild.id}) — zsynchronizowano {len(synced)} komend")
+    except Exception as e:
+        logger.error(f"❌ Błąd synchronizacji dla {guild.name}: {e}")
+
+
+@bot.event
 async def on_ready():
     logger.info(f"✅ Bot zalogowany jako {bot.user}")
     bot.add_view(RankingView())

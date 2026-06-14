@@ -113,6 +113,9 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
     comments_map = get_corrections_with_comments(week_start, gid)
 
     wyniki_tygodnia = wyniki.get(week_start, {})
+    logger.info(f"[DEBUG] week_start={week_start}, wyniki_tygodnia keys={list(wyniki_tygodnia.keys())[:5]}")
+    if 'sPatryk' in wyniki_tygodnia:
+        logger.info(f"[DEBUG] sPatryk wyniki: {wyniki_tygodnia['sPatryk']}")
 
     if not wyniki_tygodnia:
         zakres = f"{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}"

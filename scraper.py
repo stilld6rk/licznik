@@ -230,6 +230,7 @@ def run_scraper():
     logger.info("🚀 Uruchamiam scraper...")
 
     configs = get_all_active_guild_configs()
+    logger.info(f"📋 Znaleziono {len(configs)} aktywnych konfiguracji: {[c.guild_name for c in configs]}")
     if not configs:
         logger.info("⚠️  Brak konfiguracji w DB, używam zmiennych środowiskowych")
         get_discord_members(GUILD_ID, ROLE_ID)

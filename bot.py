@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timedelta
-from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
+from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
     is_week_off, set_week_off, delete_correction, get_corrections_for_week
@@ -14,6 +14,15 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def is_admin(interaction: discord.Interaction) -> bool:
+    """Sprawdź czy użytkownik ma uprawnienia admina (rola ADMIN_ROLE_ID lub serwer Administrator)"""
+    if interaction.user.guild_permissions.administrator:
+        return True
+    if ADMIN_ROLE_ID:
+        return any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles)
+    return False
+
 
 intents = discord.Intents.default()
 intents.members = True
@@ -101,7 +110,7 @@ async def wpata_reczna_command(
     """
     try:
         # Sprawdzenie uprawnień (admin)
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message(
                 "❌ Tylko admini mogą dodawać ręczne wpłaty",
                 ephemeral=True
@@ -196,7 +205,7 @@ async def ustaw_dolaczenie_command(
     """
     try:
         # Sprawdzenie uprawnień
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message(
                 "❌ Tylko admini mogą to ustawiać",
                 ephemeral=True
@@ -370,7 +379,7 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
     """Ustaw tydzień jako wyłączony"""
     try:
         # Sprawdzenie uprawnień
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message(
                 "❌ Tylko admini mogą to robić",
                 ephemeral=True
@@ -402,7 +411,7 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
 async def init_ranking_command(interaction: discord.Interaction):
     """Wyślij pierwszą wiadomość rankingową (lub zastąp istniejącą)"""
     try:
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
             return
 
@@ -422,7 +431,7 @@ async def init_ranking_command(interaction: discord.Interaction):
 async def aktualizuj_command(interaction: discord.Interaction):
     """Ręczna aktualizacja przypiętej wiadomości rankingowej"""
     try:
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message(
                 "❌ Tylko admini mogą to robić",
                 ephemeral=True
@@ -443,7 +452,7 @@ async def aktualizuj_command(interaction: discord.Interaction):
 async def sync_scrape_command(interaction: discord.Interaction):
     """Ręczne uruchomienie scrapera"""
     try:
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction):
             await interaction.response.send_message(
                 "❌ Tylko admini mogą to robić",
                 ephemeral=True

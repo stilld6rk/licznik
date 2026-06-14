@@ -41,9 +41,80 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+class HistoriaModal(discord.ui.Modal, title="Historia wpłat"):
+    nick = discord.ui.TextInput(
+        label="Nick gracza",
+        placeholder="Wpisz nick z gry lub Discord...",
+        min_length=1,
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        import asyncio
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, get_all_logs_for_nick, self.nick.value.strip())
+
+        if not data:
+            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{self.nick.value}**", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"📜 Historia wpłat: {data['discord_nick']}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+
+        if data['corrections']:
+            lines = []
+            for c in data['corrections']:
+                line = f"`{c['week_start'].strftime('%d.%m')}` **+{int(c['amount'])}💎**"
+                if c['payer']:
+                    line += f" od {c['payer']}"
+                if c['comment']:
+                    line += f" — *{c['comment']}*"
+                lines.append(line)
+            embed.add_field(
+                name=f"✍️ Wpłaty ręczne ({len(data['corrections'])})",
+                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                inline=False
+            )
+        else:
+            embed.add_field(name="✍️ Wpłaty ręczne", value="*Brak*", inline=False)
+
+        if data['payments']:
+            from collections import defaultdict
+            by_week = defaultdict(float)
+            for p in data['payments']:
+                by_week[p['week_start']] += p['amount']
+            lines = [
+                f"`{ws.strftime('%d.%m.%Y')}` **{int(total)}💎**"
+                for ws, total in sorted(by_week.items(), reverse=True)
+            ]
+            embed.add_field(
+                name=f"🎮 Wpłaty z gry ({len(by_week)} tygodni, łącznie {int(sum(by_week.values()))}💎)",
+                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                inline=False
+            )
+        else:
+            embed.add_field(name="🎮 Wpłaty z gry", value="*Brak*", inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+class RankingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📜 Historia wpłat", style=discord.ButtonStyle.secondary, custom_id="historia_btn")
+    async def historia_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(HistoriaModal())
+
+
 @bot.event
 async def on_ready():
     logger.info(f"✅ Bot zalogowany jako {bot.user}")
+    bot.add_view(RankingView())  # persistent view — survives restarts
 
     # Sync commands first — before any slow operations
     try:
@@ -77,17 +148,18 @@ async def update_ranking():
     content = await loop.run_in_executor(None, build_ranking_content)
     msg_id = get_pinned_message_id()
 
+    view = RankingView()
     if msg_id:
         try:
             msg = await channel.fetch_message(int(msg_id))
-            await msg.edit(content=content)
+            await msg.edit(content=content, view=view)
             logger.info(f"✏️  Zaktualizowano wiadomość {msg_id}")
             return
         except discord.NotFound:
             logger.warning("⚠️  Stara wiadomość usunięta, tworzę nową")
             save_pinned_message_id(None)
 
-    new_msg = await channel.send(content)
+    new_msg = await channel.send(content, view=view)
     save_pinned_message_id(str(new_msg.id))
     logger.info(f"📤 Wysłano nową wiadomość {new_msg.id}")
 

@@ -40,6 +40,7 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
     corrections_grouped = get_all_corrections_grouped(gid)
     member_info_map = _get_all_member_info(gid)
 
+    logger.info(f"[DEBUG] corrections_grouped: {corrections_grouped}")
     rankingi_per_tydzien = {}
     all_weeks = set(list(payments_grouped.keys()) + list(corrections_grouped.keys()))
     for ws in all_weeks:

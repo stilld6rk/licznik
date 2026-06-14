@@ -5,7 +5,7 @@ import requests
 from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta
 from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, DISCORD_BOT_TOKEN as BOT_TOKEN, HEADLESS
-from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick
+from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick, get_all_active_guild_configs
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -18,12 +18,14 @@ def oczysc_nick_v(nick):
     return re.sub(r'[Vv]\d+$', '', str(nick)).strip()
 
 
-def get_discord_members():
-    """Pobierz listę członków z roli Discord"""
+def get_discord_members(guild_id: int = None, role_id: int = None):
+    """Pobierz listę członków z roli Discord dla danego guildu"""
+    gid = guild_id or GUILD_ID
+    rid = role_id or ROLE_ID
     headers = {"Authorization": f"Bot {BOT_TOKEN}"}
-    url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members?limit=1000"
+    url = f"https://discord.com/api/v10/guilds/{gid}/members?limit=1000"
 
-    logger.info(f"🔍 Pobieram członków z Guild ID: {GUILD_ID}, Role ID: {ROLE_ID}")
+    logger.info(f"🔍 Pobieram członków z Guild ID: {gid}, Role ID: {rid}")
     response = requests.get(url, headers=headers)
     logger.info(f"📡 API status: {response.status_code}")
 
@@ -40,29 +42,28 @@ def get_discord_members():
         user = member.get('user', {})
         username = user.get('username', '?')
 
-        if str(ROLE_ID) in [str(r) for r in roles]:
+        if str(rid) in [str(r) for r in roles]:
             dc_nick = oczysc_nick_v(member.get('nick') or user.get('display_name') or username)
             if dc_nick:
                 game_nick = dc_nick
                 if game_nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
                     game_nick = "SKUTY SZKIELET"
-                m = get_or_create_member(game_nick, user.get('id'))
-                # Zawsze aktualizuj discord_nick z aktualnego DC
-                _update_discord_nick(game_nick, dc_nick)
+                get_or_create_member(game_nick, user.get('id'), guild_id=gid)
+                _update_discord_nick(game_nick, dc_nick, guild_id=gid)
                 members.append(game_nick)
                 logger.info(f"  ✅ Znaleziono członka z rolą: {dc_nick}")
         else:
             logger.debug(f"  ⏭️  Brak roli: {username} (role: {roles})")
 
     current = list(set(members))
-    logger.info(f"📋 Znaleziono {len(current)} członków z rolą {ROLE_ID}")
+    logger.info(f"📋 Znaleziono {len(current)} członków z rolą {rid}")
 
     # Wyczyść discord_id dla członków którzy utracili rolę
     from database import get_session, GuildMember
     session = get_session()
     try:
         old_with_role = session.query(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID,
+            GuildMember.guild_id == gid,
             GuildMember.discord_id.isnot(None)
         ).all()
         removed = [m for m in old_with_role if m.nick not in current]
@@ -78,9 +79,9 @@ def get_discord_members():
 
 
 def scrape_hard_logs() -> list:
-    """Scrapuj logi z Projekt Hard"""
+    """Scrapuj logi z Projekt Hard (jeden raz dla wszystkich gildii)"""
     logger.info("🌐 Łączę się z Projekt Hard...")
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -104,42 +105,36 @@ def scrape_hard_logs() -> list:
             page.goto("https://projekt-hard.eu/", wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
             logger.info(f"📄 Tytuł strony: {page.title()}")
-            logger.info(f"🔗 URL: {page.url}")
 
             buttons = page.get_by_role("button").all()
             logger.info(f"🔘 Przyciski na stronie: {[b.inner_text() for b in buttons]}")
 
-            # Logowanie
             page.get_by_role("button", name="Zaloguj").click(timeout=60000)
             page.get_by_role("textbox", name="Login lub e-mail...").fill(HARD_LOGIN)
             page.get_by_role("textbox", name="Hasło...").fill(HARD_PASSWORD)
             page.get_by_role("textbox", name="Pin...").fill(HARD_PIN)
             page.get_by_role("button", name="Zaloguj się").click()
             page.wait_for_timeout(3000)
-            
-            # Otwórz Logi Gildii
+
             page.get_by_role("link", name="Logi Gildii").first.click()
             page.get_by_label("Pokaż 102550100 pozycji", exact=True).select_option("100")
             page.wait_for_selector("#guild_logs_table")
-            
-            # Zbierz wszystkie strony
+
             all_frames = []
             while True:
                 html = page.inner_html("#guild_logs_table")
                 all_frames.append(pd.read_html(io.StringIO(f"<table>{html}</table>"))[0])
-                
+
                 next_btn = page.locator("#guild_logs_table_next")
                 if "disabled" not in (next_btn.get_attribute("class") or ""):
                     next_btn.locator("a").click()
                     page.wait_for_timeout(700)
                 else:
                     break
-            
+
             logger.info(f"✅ Pobrano {len(all_frames)} stron")
-            
             browser.close()
-            
-            # Przetwórz dane
+
             df = pd.concat(all_frames, ignore_index=True)
             df = df[~df['Nazwa członka'].str.contains('->', na=False)].copy()
             df['Nazwa członka'] = (
@@ -147,30 +142,16 @@ def scrape_hard_logs() -> list:
                 .apply(oczysc_nick_v)
                 .replace({'SKUTABABA': 'SKUTY SZKIELET', 'SKUTYSIURAS': 'SKUTY SZKIELET', 'ASPIRIN': 'SKUTY SZKIELET'})
             )
-            
+
             df['Ilość'] = df['Przedmiot'].str.extract(r'(\d+)').astype(float).fillna(0)
             df['Data'] = pd.to_datetime(df['Data'], format='%H:%M %d.%m.%Y')
-            
-            # Loguj unikalne nicki ze scrapera
-            scraped_nicks = set(df['Nazwa członka'].unique())
-            valid_members = set(get_all_active_members())
-
-            matched = scraped_nicks & valid_members
-            unmatched = scraped_nicks - valid_members
-
-            logger.info(f"📊 Nicki ze scrapera: {sorted(scraped_nicks)}")
-            logger.info(f"✅ Pasujące do DC: {sorted(matched)}")
-            logger.info(f"❓ Nie pasują do DC: {sorted(unmatched)}")
-
-            # Zapisuj WSZYSTKIE rekordy (nie filtruj po DC)
             df['Tydzien'] = df['Data'].apply(
                 lambda x: (x - timedelta(days=x.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             )
-            tygodnie_w_danych = sorted(df['Tydzien'].unique())
-            logger.info(f"📅 Tygodnie w danych: {[t.strftime('%d.%m.%Y') for t in tygodnie_w_danych]}")
+
             logger.info(f"✅ Przetworzono {len(df)} wpisów łącznie")
             return df.to_dict('records')
-        
+
         except Exception as e:
             logger.error(f"❌ Błąd podczas scrapowania: {e}")
             logger.error(f"📄 Tytuł przy błędzie: {page.title()}")
@@ -179,20 +160,20 @@ def scrape_hard_logs() -> list:
             return []
 
 
-def save_scrape_to_db(records: list):
-    """Zapisz dane scrapowania do bazy (pomija duplikaty)"""
+def save_scrape_to_db(records: list, guild_id: int = None):
+    """Zapisz dane scrapowania do bazy dla danego guildu (pomija duplikaty)"""
     from database import get_session, Payment, GuildMember
+    gid = guild_id or GUILD_ID
     saved = 0
     skipped = 0
     for record in records:
         try:
             session = get_session()
-            member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=record['Nazwa członka']).first()
+            member = session.query(GuildMember).filter_by(guild_id=gid, nick=record['Nazwa członka']).first()
             if not member:
                 session.close()
                 skipped += 1
                 continue
-            # Sprawdź duplikat po member_id + date + amount
             exists = session.query(Payment).filter_by(
                 member_id=member.id,
                 date=record['Data'],
@@ -204,7 +185,8 @@ def save_scrape_to_db(records: list):
                     nick=record['Nazwa członka'],
                     amount=int(record['Ilość']),
                     date=record['Data'],
-                    item_name=record['Przedmiot']
+                    item_name=record['Przedmiot'],
+                    guild_id=gid,
                 )
                 saved += 1
             else:
@@ -212,22 +194,40 @@ def save_scrape_to_db(records: list):
         except Exception as e:
             logger.error(f"❌ Błąd przy zapisie wpłaty {record.get('Nazwa członka')}: {e}")
 
-    logger.info(f"✅ Zapisano {saved} nowych wpłat, pominięto {skipped} duplikatów/nieznanych")
+    logger.info(f"[Guild {gid}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped}")
 
 
 def run_scraper():
-    """Główna funkcja scrapowania"""
+    """Scrapuj raz, zapisz do każdego aktywnego guildu"""
     logger.info("🚀 Uruchamiam scraper...")
-    
-    # Aktualizuj członków
-    members = get_discord_members()
-    logger.info(f"📋 Znaleziono {len(members)} członków")
-    
-    # Scrapuj i zapisz
+
+    configs = get_all_active_guild_configs()
+    if not configs:
+        # Fallback: tryb legacy z env vars
+        logger.info("⚠️  Brak konfiguracji w DB, używam zmiennych środowiskowych")
+        get_discord_members(GUILD_ID, ROLE_ID)
+        records = scrape_hard_logs()
+        if records:
+            save_scrape_to_db(records, GUILD_ID)
+        logger.info("✅ Scraper ukończony (tryb legacy)")
+        return
+
+    # Zaktualizuj członków dla każdego guildu
+    for cfg in configs:
+        logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({cfg.guild_id})")
+        get_discord_members(cfg.guild_id, cfg.role_id)
+
+    # Scrapuj logi raz
     records = scrape_hard_logs()
-    if records:
-        save_scrape_to_db(records)
-    
+    if not records:
+        logger.info("✅ Scraper ukończony (brak danych)")
+        return
+
+    # Zapisz dla każdego guildu
+    for cfg in configs:
+        logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
+        save_scrape_to_db(records, cfg.guild_id)
+
     logger.info("✅ Scraper ukończony")
 
 

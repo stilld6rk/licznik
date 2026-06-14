@@ -74,6 +74,22 @@ class WeeklyMessage(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class GuildConfig(Base):
+    __tablename__ = "guild_configs"
+
+    guild_id = Column(BigInteger, primary_key=True)
+    guild_name = Column(String(100), nullable=False, default="Gildia")
+    ranking_channel_id = Column(BigInteger, nullable=True)
+    role_id = Column(BigInteger, default=0)
+    admin_role_id = Column(BigInteger, default=0)
+    member_role_id = Column(BigInteger, default=0)
+    limit = Column(Integer, default=4)
+    pinned_message_id = Column(String(50), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class DebtCarryover(Base):
     __tablename__ = "debt_carryover"
 
@@ -97,6 +113,8 @@ def init_db():
             # Drop old unique constraints that don't include guild_id
             "ALTER TABLE guild_members DROP CONSTRAINT IF EXISTS guild_members_nick_key",
             "ALTER TABLE weekly_messages DROP CONSTRAINT IF EXISTS weekly_messages_week_start_key",
+            # guild_configs table is created by SQLAlchemy above; add pinned_message_id if missing
+            "ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS pinned_message_id VARCHAR(50)",
         ]
         for sql in migrations:
             try:

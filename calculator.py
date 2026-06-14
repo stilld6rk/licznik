@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
-from config import LIMIT, GUILD_NAME
+from config import LIMIT, GUILD_NAME, GUILD_ID
 from db_helper import (
     get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
-    get_corrections_with_comments, is_week_off
+    get_corrections_with_comments, is_week_off, _get_all_member_info
 )
 import logging
 
@@ -27,39 +27,15 @@ def get_weeks_since_start() -> list:
     return weeks
 
 
-def _get_all_member_info() -> dict:
-    """Batch fetch wszystkich info o członkach {nick: info}"""
-    from database import get_session, GuildMember
-    from config import GUILD_ID
-    session = get_session()
-    try:
-        members = session.query(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID,
-            GuildMember.is_active == True,
-            GuildMember.discord_id.isnot(None)
-        ).all()
-        return {
-            m.nick: {
-                'join_date': m.join_date,
-                'discord_nick': m.discord_nick or m.nick,
-            }
-            for m in members
-        }
-    finally:
-        session.close()
+def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
+    gid = guild_id or GUILD_ID
+    lim = limit or LIMIT
 
+    lista_dc = get_all_active_members(gid)
+    payments_grouped = get_all_payments_grouped(gid)
+    corrections_grouped = get_all_corrections_grouped(gid)
+    member_info_map = _get_all_member_info(gid)
 
-def oblicz_zaleglosci() -> tuple:
-    """
-    Identyczna logika jak w oryginalnym skrypcie.
-    Zwraca (wyniki_per_tydzien, aktywne_tygodnie).
-    """
-    lista_dc = get_all_active_members()
-    payments_grouped = get_all_payments_grouped()
-    corrections_grouped = get_all_corrections_grouped()
-    member_info_map = _get_all_member_info()
-
-    # Połącz payments + corrections per week+nick
     rankingi_per_tydzien = {}
     all_weeks = set(list(payments_grouped.keys()) + list(corrections_grouped.keys()))
     for ws in all_weeks:
@@ -70,9 +46,8 @@ def oblicz_zaleglosci() -> tuple:
             rankingi_per_tydzien[ws][nick] = val
 
     tygodnie_posortowane = get_weeks_since_start()
-    aktywne = [t for t in tygodnie_posortowane if not is_week_off(t)]
+    aktywne = [t for t in tygodnie_posortowane if not is_week_off(t, gid)]
 
-    # In-memory carryover — identycznie jak oryginał
     przeniesienia = {nick: 0 for nick in lista_dc}
     wyniki = {}
 
@@ -81,7 +56,6 @@ def oblicz_zaleglosci() -> tuple:
         wyniki[tydzien] = {}
 
         for nick in lista_dc:
-            # Logika daty dołączenia
             member_info = member_info_map.get(nick)
             if member_info and member_info['join_date']:
                 join_date = member_info['join_date']
@@ -95,11 +69,11 @@ def oblicz_zaleglosci() -> tuple:
             przen = przeniesienia[nick]
             efektywna = wplata_raw + przen
 
-            if efektywna > LIMIT:
-                nadwyzka = efektywna - LIMIT
-                wyswietlana = LIMIT
+            if efektywna > lim:
+                nadwyzka = efektywna - lim
+                wyswietlana = lim
             elif efektywna <= 0:
-                nadwyzka = efektywna - LIMIT
+                nadwyzka = efektywna - lim
                 wyswietlana = 0
             else:
                 nadwyzka = 0
@@ -118,18 +92,22 @@ def oblicz_zaleglosci() -> tuple:
     return wyniki, aktywne, member_info_map
 
 
-def build_ranking_content() -> str:
-    wyniki, aktywne, member_info_map = oblicz_zaleglosci()
+def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: int = None) -> str:
+    gid = guild_id or GUILD_ID
+    lim = limit or LIMIT
+    gname = guild_name or GUILD_NAME
+
+    wyniki, aktywne, member_info_map = oblicz_zaleglosci(gid, lim)
 
     week_start = get_current_week_start()
     week_end = week_start + timedelta(days=6)
-    comments_map = get_corrections_with_comments(week_start)
+    comments_map = get_corrections_with_comments(week_start, gid)
 
     wyniki_tygodnia = wyniki.get(week_start, {})
 
     if not wyniki_tygodnia:
         zakres = f"{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}"
-        return f"💎 RANKING TYGODNIOWY — {GUILD_NAME} ({zakres})\n\nBrak danych."
+        return f"💎 RANKING TYGODNIOWY — {gname} ({zakres})\n\nBrak danych."
 
     posortowani = sorted(
         wyniki_tygodnia.items(),
@@ -139,7 +117,7 @@ def build_ranking_content() -> str:
 
     medals = ["🥇", "🥈", "🥉"]
     medal_idx = 0
-    lines = [f"💎 RANKING TYGODNIOWY — {GUILD_NAME} ({week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')})"]
+    lines = [f"💎 RANKING TYGODNIOWY — {gname} ({week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')})"]
 
     for nick, dane in posortowani:
         ilosc_raw = int(dane['ilosc_raw'])
@@ -154,7 +132,7 @@ def build_ranking_content() -> str:
         else:
             detail = f"(wpłacono {ilosc_raw}💎)"
 
-        if efektywna >= LIMIT:
+        if efektywna >= lim:
             ikona = medals[medal_idx] if medal_idx < 3 else "🔹"
             medal_idx += 1
         elif efektywna > 0:

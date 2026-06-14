@@ -1,17 +1,83 @@
 from sqlalchemy import func
-from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover
+from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig
 from config import GUILD_ID
 from datetime import datetime, timedelta
 
-_PINNED_SENTINEL = datetime(1970, 1, 1)
 
+# ── Guild config ───────────────────────────────────────────────────────────────
 
-def get_or_create_member(nick: str, discord_id: int = None) -> GuildMember:
+def get_guild_config(guild_id: int):
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        return session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+    finally:
+        session.close()
+
+
+def get_all_active_guild_configs() -> list:
+    session = get_session()
+    try:
+        return session.query(GuildConfig).filter_by(is_active=True).all()
+    finally:
+        session.close()
+
+
+def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
+                      role_id: int, admin_role_id: int = 0, member_role_id: int = 0,
+                      limit: int = 4):
+    session = get_session()
+    try:
+        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        if cfg:
+            cfg.guild_name = guild_name
+            cfg.ranking_channel_id = ranking_channel_id
+            cfg.role_id = role_id
+            cfg.admin_role_id = admin_role_id
+            cfg.member_role_id = member_role_id
+            cfg.limit = limit
+            cfg.is_active = True
+        else:
+            cfg = GuildConfig(
+                guild_id=guild_id, guild_name=guild_name,
+                ranking_channel_id=ranking_channel_id,
+                role_id=role_id, admin_role_id=admin_role_id,
+                member_role_id=member_role_id, limit=limit,
+            )
+            session.add(cfg)
+        session.commit()
+    finally:
+        session.close()
+
+
+def get_pinned_message_id_for(guild_id: int) -> str | None:
+    session = get_session()
+    try:
+        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        return cfg.pinned_message_id if cfg else None
+    finally:
+        session.close()
+
+
+def save_pinned_message_id_for(guild_id: int, message_id: str | None):
+    session = get_session()
+    try:
+        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        if cfg:
+            cfg.pinned_message_id = message_id
+            session.commit()
+    finally:
+        session.close()
+
+
+# ── Members ────────────────────────────────────────────────────────────────────
+
+def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None) -> GuildMember:
+    gid = guild_id or GUILD_ID
+    session = get_session()
+    try:
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
-            member = GuildMember(guild_id=GUILD_ID, nick=nick, discord_id=discord_id)
+            member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id)
             session.add(member)
             session.commit()
         elif discord_id and not member.discord_id:
@@ -22,11 +88,12 @@ def get_or_create_member(nick: str, discord_id: int = None) -> GuildMember:
         session.close()
 
 
-def get_all_active_members() -> list:
+def get_all_active_members(guild_id: int = None) -> list:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         members = session.query(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID,
+            GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None)
         ).all()
@@ -35,10 +102,11 @@ def get_all_active_members() -> list:
         session.close()
 
 
-def _update_discord_nick(nick: str, discord_nick: str):
+def _update_discord_nick(nick: str, discord_nick: str, guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if member and member.discord_nick != discord_nick:
             member.discord_nick = discord_nick
             session.commit()
@@ -46,10 +114,11 @@ def _update_discord_nick(nick: str, discord_nick: str):
         session.close()
 
 
-def update_member_join_date(nick: str, join_date: datetime, force: bool = False):
+def update_member_join_date(nick: str, join_date: datetime, force: bool = False, guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if member:
             if not member.join_date or force:
                 member.join_date = join_date
@@ -60,10 +129,11 @@ def update_member_join_date(nick: str, join_date: datetime, force: bool = False)
         session.close()
 
 
-def get_member_info(nick: str):
+def get_member_info(nick: str, guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if member:
             return {
                 'nick': member.nick,
@@ -77,10 +147,12 @@ def get_member_info(nick: str):
         session.close()
 
 
-def add_payment(nick: str, amount: float, date: datetime, item_name: str = None):
+# ── Payments ───────────────────────────────────────────────────────────────────
+
+def add_payment(nick: str, amount: float, date: datetime, item_name: str = None, guild_id: int = None):
     session = get_session()
     try:
-        member = get_or_create_member(nick)
+        member = get_or_create_member(nick, guild_id=guild_id)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         payment = Payment(member_id=member.id, amount=amount, date=date, item_name=item_name, week_start=week_start)
         session.add(payment)
@@ -90,10 +162,12 @@ def add_payment(nick: str, amount: float, date: datetime, item_name: str = None)
 
 
 def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
-                          payer: str = None, comment: str = None, set_by: int = None):
+                          payer: str = None, comment: str = None, set_by: int = None,
+                          guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        recipient = get_or_create_member(recipient_nick)
+        recipient = get_or_create_member(recipient_nick, guild_id=gid)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
             recipient_id=recipient.id, payer=payer, amount=amount,
@@ -105,11 +179,12 @@ def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
         session.close()
 
 
-def get_corrections_for_week(week_start: datetime) -> dict:
+def get_corrections_for_week(week_start: datetime, guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         corrections = session.query(ManualCorrection).join(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID,
+            GuildMember.guild_id == gid,
             ManualCorrection.week_start == week_start
         ).all()
         result = {}
@@ -121,35 +196,38 @@ def get_corrections_for_week(week_start: datetime) -> dict:
         session.close()
 
 
-def set_week_off(week_start: datetime, is_off: bool = True):
+def set_week_off(week_start: datetime, is_off: bool = True, guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=week_start).first()
+        msg = session.query(WeeklyMessage).filter_by(guild_id=gid, week_start=week_start).first()
         if msg:
             msg.is_off = is_off
         else:
-            msg = WeeklyMessage(guild_id=GUILD_ID, week_start=week_start, is_off=is_off)
+            msg = WeeklyMessage(guild_id=gid, week_start=week_start, is_off=is_off)
             session.add(msg)
         session.commit()
     finally:
         session.close()
 
 
-def is_week_off(week_start: datetime) -> bool:
+def is_week_off(week_start: datetime, guild_id: int = None) -> bool:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=week_start).first()
+        msg = session.query(WeeklyMessage).filter_by(guild_id=gid, week_start=week_start).first()
         return msg.is_off if msg else False
     finally:
         session.close()
 
 
-def delete_correction(correction_id: int):
+def delete_correction(correction_id: int, guild_id: int = None):
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         corr = session.query(ManualCorrection).join(GuildMember).filter(
             ManualCorrection.id == correction_id,
-            GuildMember.guild_id == GUILD_ID
+            GuildMember.guild_id == gid
         ).first()
         if corr:
             session.delete(corr)
@@ -160,7 +238,8 @@ def delete_correction(correction_id: int):
         session.close()
 
 
-def get_all_payments_grouped() -> dict:
+def get_all_payments_grouped(guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         results = session.query(
@@ -168,7 +247,7 @@ def get_all_payments_grouped() -> dict:
             GuildMember.nick,
             func.sum(Payment.amount).label('total')
         ).join(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID
+            GuildMember.guild_id == gid
         ).group_by(Payment.week_start, GuildMember.nick).all()
 
         grouped = {}
@@ -180,11 +259,12 @@ def get_all_payments_grouped() -> dict:
         session.close()
 
 
-def get_all_corrections_grouped() -> dict:
+def get_all_corrections_grouped(guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         results = session.query(ManualCorrection).join(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID
+            GuildMember.guild_id == gid
         ).all()
         grouped = {}
         for corr in results:
@@ -196,10 +276,11 @@ def get_all_corrections_grouped() -> dict:
         session.close()
 
 
-def get_all_logs_for_nick(nick: str) -> dict:
+def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
             return None
         payments = session.query(Payment).filter_by(member_id=member.id).order_by(Payment.date.desc()).all()
@@ -214,10 +295,11 @@ def get_all_logs_for_nick(nick: str) -> dict:
         session.close()
 
 
-def get_corrections_for_nick(nick: str) -> list:
+def get_corrections_for_nick(nick: str, guild_id: int = None) -> list:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=nick).first()
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
             return []
         corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
@@ -245,11 +327,12 @@ def update_correction(correction_id: int, amount: float = None, comment: str = N
         session.close()
 
 
-def get_corrections_with_comments(week_start: datetime) -> dict:
+def get_corrections_with_comments(week_start: datetime, guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
         results = session.query(ManualCorrection).join(GuildMember).filter(
-            GuildMember.guild_id == GUILD_ID,
+            GuildMember.guild_id == gid,
             ManualCorrection.week_start == week_start,
             ManualCorrection.comment.isnot(None)
         ).all()
@@ -262,28 +345,30 @@ def get_corrections_with_comments(week_start: datetime) -> dict:
         session.close()
 
 
-def get_pinned_message_id() -> str | None:
+def _get_all_member_info(guild_id: int = None) -> dict:
+    gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL).first()
-        return msg.message_id if msg else None
+        members = session.query(GuildMember).filter(
+            GuildMember.guild_id == gid,
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None)
+        ).all()
+        return {
+            m.nick: {
+                'join_date': m.join_date,
+                'discord_nick': m.discord_nick or m.nick,
+            }
+            for m in members
+        }
     finally:
         session.close()
+
+
+# Legacy helpers — kept for backward compat with old env-var single-guild deploys
+def get_pinned_message_id() -> str | None:
+    return get_pinned_message_id_for(GUILD_ID)
 
 
 def save_pinned_message_id(message_id: str | None):
-    session = get_session()
-    try:
-        msg = session.query(WeeklyMessage).filter_by(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL).first()
-        if message_id is None:
-            if msg:
-                session.delete(msg)
-        else:
-            if msg:
-                msg.message_id = message_id
-            else:
-                msg = WeeklyMessage(guild_id=GUILD_ID, week_start=_PINNED_SENTINEL, message_id=message_id)
-                session.add(msg)
-        session.commit()
-    finally:
-        session.close()
+    save_pinned_message_id_for(GUILD_ID, message_id)

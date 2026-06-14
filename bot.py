@@ -445,16 +445,29 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
             pass
 
 
-@bot.tree.command(name="aktualizuj", description="[ADMIN] Ręcznie zaktualizuj ranking")
-async def aktualizuj_command(interaction: discord.Interaction):
+@bot.tree.command(name="aktualizuj", description="[ADMIN] Ręcznie zaktualizuj ranking (opcjonalnie podaj nazwę gildii)")
+@app_commands.describe(gildia="Nazwa gildii do zaktualizowania (zostaw puste = ta gildia)")
+async def aktualizuj_command(interaction: discord.Interaction, gildia: str = None):
     try:
         if not is_admin(interaction):
             await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
-        await update_ranking(interaction.guild_id)
-        cfg = _get_cfg(interaction.guild_id)
+
+        if gildia:
+            configs = get_all_active_guild_configs()
+            match = next((c for c in configs if c.guild_name.lower() == gildia.strip().lower()), None)
+            if not match:
+                names = ", ".join(c.guild_name for c in configs)
+                await interaction.followup.send(f"❌ Nie znaleziono gildii: **{gildia}**\nDostępne: {names}", ephemeral=True)
+                return
+            await update_ranking(match.guild_id)
+            cfg = match
+        else:
+            await update_ranking(interaction.guild_id)
+            cfg = _get_cfg(interaction.guild_id)
+
         embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
         embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
         embed.add_field(name="📢 Kanał", value=f"<#{cfg.ranking_channel_id}>", inline=True)

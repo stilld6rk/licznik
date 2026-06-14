@@ -40,8 +40,6 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
     corrections_grouped = get_all_corrections_grouped(gid)
     member_info_map = _get_all_member_info(gid)
 
-    logger.info(f"[DEBUG] corrections_grouped: {corrections_grouped}")
-    logger.info(f"[DEBUG] corrections_grouped: {corrections_grouped}")
     rankingi_per_tydzien = {}
     all_weeks = set(list(payments_grouped.keys()) + list(corrections_grouped.keys()))
     for ws in all_weeks:
@@ -50,12 +48,7 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
             val = payments_grouped.get(ws, {}).get(nick, 0)
             val += corrections_grouped.get(ws, {}).get(nick, 0)
             rankingi_per_tydzien[ws][nick] = val
-    # log sPatryk's rankingi for Jun 8
-    for ws, rd in rankingi_per_tydzien.items():
-        if 'sPatryk' in rd:
-            logger.info(f"[DEBUG] rankingi[{ws.strftime('%d.%m')}][sPatryk]={rd['sPatryk']}")
 
-    # Wyznacz tygodnie — zaczyn od najwcześniejszej daty dołączenia lub START_DATE
     def _join_week(nick):
         info = member_info_map.get(nick)
         if info and info.get('join_date'):
@@ -81,8 +74,6 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
 
             wplata_raw = ranking_dict.get(nick, 0)
             przen = przeniesienia[nick]
-            if nick == 'sPatryk':
-                logger.info(f"[DEBUG] sPatryk @ {tydzien.strftime('%d.%m')}: raw={wplata_raw}, przen={przen}")
             efektywna = wplata_raw + przen
 
             if efektywna > lim:
@@ -120,9 +111,6 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
     comments_map = get_corrections_with_comments(week_start, gid)
 
     wyniki_tygodnia = wyniki.get(week_start, {})
-    logger.info(f"[DEBUG] week_start={week_start}, wyniki_tygodnia keys={list(wyniki_tygodnia.keys())[:5]}")
-    if 'sPatryk' in wyniki_tygodnia:
-        logger.info(f"[DEBUG] sPatryk wyniki: {wyniki_tygodnia['sPatryk']}")
 
     if not wyniki_tygodnia:
         zakres = f"{week_start.strftime('%d.%m')} - {week_end.strftime('%d.%m')}"

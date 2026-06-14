@@ -491,25 +491,22 @@ async def sync_scrape_command(interaction: discord.Interaction):
             )
             return
         
-        await interaction.response.defer()
-        
-        embed = discord.Embed(
-            title="🔄 Scraper uruchomiony",
-            description="Czekaj...",
-            color=discord.Color.blue()
+        await interaction.response.defer(ephemeral=True)
+
+        msg = await interaction.followup.send(
+            embed=discord.Embed(title="🔄 Scraper uruchomiony", description="Czekaj...", color=discord.Color.blue()),
+            ephemeral=True,
+            wait=True
         )
-        await interaction.followup.send(embed=embed)
-        
+
         import asyncio
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_scraper)
         await update_ranking()
 
-        embed = discord.Embed(
-            title="✅ Scraper ukończony i ranking zaktualizowany",
-            color=discord.Color.green()
-        )
-        await interaction.followup.send(embed=embed)
+        await msg.edit(embed=discord.Embed(title="✅ Scraper ukończony i ranking zaktualizowany", color=discord.Color.green()))
+        await asyncio.sleep(60)
+        await msg.delete()
         logger.info("✅ Ręczny scraper uruchomiony")
         
     except Exception as e:

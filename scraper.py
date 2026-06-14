@@ -62,6 +62,7 @@ def get_discord_members():
     session = get_session()
     try:
         old_with_role = session.query(GuildMember).filter(
+            GuildMember.guild_id == GUILD_ID,
             GuildMember.discord_id.isnot(None)
         ).all()
         removed = [m for m in old_with_role if m.nick not in current]
@@ -186,7 +187,7 @@ def save_scrape_to_db(records: list):
     for record in records:
         try:
             session = get_session()
-            member = session.query(GuildMember).filter_by(nick=record['Nazwa członka']).first()
+            member = session.query(GuildMember).filter_by(guild_id=GUILD_ID, nick=record['Nazwa członka']).first()
             if not member:
                 session.close()
                 skipped += 1

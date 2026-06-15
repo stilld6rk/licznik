@@ -444,17 +444,22 @@ async def wpata_reczna_command(
 
 
 @bot.tree.command(name="ustaw_dołączenie", description="[ADMIN] Ustaw datę dołączenia członka")
-@app_commands.describe(nick="Nazwa gracza", date="Data dołączenia (YYYY-MM-DD)")
+@app_commands.describe(nick="Nazwa gracza", date="Data dołączenia (DD.MM.YYYY lub YYYY-MM-DD)")
 async def ustaw_dolaczenie_command(interaction: discord.Interaction, nick: str, date: str):
     try:
         if not is_admin(interaction):
             await interaction.response.send_message("❌ Tylko admini mogą to ustawiać", ephemeral=True)
             return
 
-        try:
-            join_date = datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            await interaction.response.send_message("❌ Zły format daty! Użyj: YYYY-MM-DD", ephemeral=True)
+        join_date = None
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+            try:
+                join_date = datetime.strptime(date.strip(), fmt)
+                break
+            except ValueError:
+                continue
+        if not join_date:
+            await interaction.response.send_message("❌ Zły format daty! Użyj: DD.MM.YYYY lub YYYY-MM-DD", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)

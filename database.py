@@ -138,6 +138,14 @@ def init_db():
             "ALTER TABLE guild_configs DROP CONSTRAINT IF EXISTS guild_configs_pkey",
             "ALTER TABLE guild_configs ADD PRIMARY KEY (ranking_channel_id)",
             "ALTER TABLE guild_configs ADD CONSTRAINT IF NOT EXISTS uq_discord_guild_name UNIQUE (discord_guild_id, guild_name)",
+            # Clean up orphaned members: no discord_id, no payments, no corrections
+            """DELETE FROM guild_members WHERE discord_id IS NULL
+               AND id NOT IN (SELECT DISTINCT member_id FROM payments)
+               AND id NOT IN (SELECT DISTINCT recipient_id FROM manual_corrections)""",
+            # Set discord_id=0 for members that have corrections but discord_id IS NULL
+            """UPDATE guild_members SET discord_id = 0
+               WHERE discord_id IS NULL
+               AND id IN (SELECT DISTINCT recipient_id FROM manual_corrections)""",
         ]
         for sql in migrations:
             try:

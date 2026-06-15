@@ -126,7 +126,7 @@ def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None
             member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id)
             session.add(member)
             session.commit()
-        elif discord_id and not member.discord_id:
+        elif discord_id is not None and member.discord_id is None:
             member.discord_id = discord_id
             session.commit()
         return member
@@ -141,9 +141,7 @@ def get_all_active_members(guild_id: int = None) -> list:
         members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
-        ).filter(
-            (GuildMember.discord_id.isnot(None)) |
-            (GuildMember.corrections.any())
+            GuildMember.discord_id.isnot(None),
         ).all()
         return [m.nick for m in members]
     finally:
@@ -215,7 +213,8 @@ def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        recipient = get_or_create_member(recipient_nick, guild_id=gid)
+        # discord_id=0 so the member passes the discord_id IS NOT NULL filter
+        recipient = get_or_create_member(recipient_nick, discord_id=0, guild_id=gid)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
             recipient_id=recipient.id, payer=payer, amount=amount,
@@ -402,9 +401,7 @@ def _get_all_member_info(guild_id: int = None) -> dict:
         members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
-        ).filter(
-            (GuildMember.discord_id.isnot(None)) |
-            (GuildMember.corrections.any())
+            GuildMember.discord_id.isnot(None),
         ).all()
         return {
             m.nick: {

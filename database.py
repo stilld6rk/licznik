@@ -146,6 +146,15 @@ def init_db():
             """UPDATE guild_members SET discord_id = 0
                WHERE discord_id IS NULL
                AND id IN (SELECT DISTINCT recipient_id FROM manual_corrections)""",
+            # Deactivate duplicate configs: keep only the latest ranking_channel_id per (discord_guild_id, guild_name)
+            """UPDATE guild_configs SET is_active = false
+               WHERE is_active = true
+               AND ranking_channel_id NOT IN (
+                   SELECT MAX(ranking_channel_id)
+                   FROM guild_configs
+                   WHERE is_active = true
+                   GROUP BY discord_guild_id, guild_name
+               )""",
         ]
         for sql in migrations:
             try:

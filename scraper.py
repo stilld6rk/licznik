@@ -5,7 +5,7 @@ import requests
 from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta
 from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, DISCORD_BOT_TOKEN as BOT_TOKEN, HEADLESS
-from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick, get_all_active_guild_configs
+from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick, get_all_active_guild_configs, save_guild_config
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +16,16 @@ def oczysc_nick_v(nick):
     if not nick:
         return nick
     return re.sub(r'[Vv]\d+$', '', str(nick)).strip()
+
+
+def _resolve_discord_guild_id(ranking_channel_id: int, fallback: int = None) -> int:
+    """Derive the Discord server ID from a channel ID via the API."""
+    headers = {"Authorization": f"Bot {BOT_TOKEN}"}
+    resp = requests.get(f"https://discord.com/api/v10/channels/{ranking_channel_id}", headers=headers)
+    if resp.status_code == 200:
+        return int(resp.json().get('guild_id', fallback or 0))
+    logger.warning(f"⚠️  Nie udało się pobrać guild_id z kanału {ranking_channel_id}: {resp.status_code}")
+    return fallback or 0
 
 
 def get_discord_members(guild_id: int = None, role_id: int = None, game_guild_id: int = None):
@@ -248,8 +258,14 @@ def run_scraper():
     seen_creds = {}  # (login, password, pin) → records
     for cfg in configs:
         game_guild_id = cfg.ranking_channel_id
-        logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({game_guild_id})")
-        get_discord_members(cfg.discord_guild_id, cfg.role_id, game_guild_id=game_guild_id)
+        discord_guild_id = _resolve_discord_guild_id(game_guild_id, fallback=cfg.discord_guild_id)
+        logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} (channel={game_guild_id}, server={discord_guild_id})")
+        if discord_guild_id and discord_guild_id != cfg.discord_guild_id:
+            logger.info(f"🔧 Naprawiam discord_guild_id dla {cfg.guild_name}: {cfg.discord_guild_id} → {discord_guild_id}")
+            save_guild_config(discord_guild_id, cfg.guild_name, game_guild_id,
+                              cfg.role_id, cfg.admin_role_id, cfg.member_role_id,
+                              cfg.limit, cfg.env_key)
+        get_discord_members(discord_guild_id, cfg.role_id, game_guild_id=game_guild_id)
 
         creds = _creds_for_guild(cfg.env_key or cfg.guild_name)
         if creds not in seen_creds:

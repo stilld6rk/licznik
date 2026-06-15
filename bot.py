@@ -9,7 +9,7 @@ from db_helper import (
     get_all_logs_for_nick, get_corrections_for_nick, update_correction,
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
-    get_guild_configs_for_server,
+    get_guild_configs_for_server, deactivate_guild_config,
 )
 from calculator import build_ranking_content
 from scraper import run_scraper
@@ -327,6 +327,49 @@ async def setup_gildii_command(
         embed.add_field(name="🔹 Rola członek", value=f"<@&{member_rid}>", inline=True)
     embed.set_footer(text=f"Skonfigurował: {interaction.user.name}")
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# ── Lista gildii / zarządzanie ────────────────────────────────────────────────
+
+@bot.tree.command(name="lista_gildii", description="[ADMIN] Lista aktywnych konfiguracji gildii na tym serwerze")
+async def lista_gildii_command(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Tylko Administrator.", ephemeral=True)
+        return
+
+    configs = get_guild_configs_for_server(interaction.guild_id)
+    if not configs:
+        await interaction.response.send_message("Brak skonfigurowanych gildii.", ephemeral=True)
+        return
+
+    lines = []
+    for c in configs:
+        lines.append(
+            f"**{c.guild_name}** | kanał: `{c.ranking_channel_id}` | rola: `{c.role_id}` | "
+            f"env: `{c.env_key}` | pinned: `{c.pinned_message_id}`"
+        )
+
+    embed = discord.Embed(title="⚙️ Aktywne gildie na tym serwerze", description="\n".join(lines), color=discord.Color.blue())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="deaktywuj_gildie", description="[ADMIN] Deaktywuj konfigurację gildii po ID kanału rankingowego")
+@app_commands.describe(kanal_id="ID kanału rankingowego gildii do deaktywacji")
+async def deaktywuj_gildie_command(interaction: discord.Interaction, kanal_id: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Tylko Administrator.", ephemeral=True)
+        return
+    try:
+        channel_id = int(kanal_id)
+    except ValueError:
+        await interaction.response.send_message("❌ Podaj poprawne ID kanału.", ephemeral=True)
+        return
+
+    ok = deactivate_guild_config(channel_id)
+    if ok:
+        await interaction.response.send_message(f"✅ Gildia z kanałem `{channel_id}` została deaktywowana.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ Nie znaleziono konfiguracji dla kanału `{channel_id}`.", ephemeral=True)
 
 
 # ── Admin commands ─────────────────────────────────────────────────────────────

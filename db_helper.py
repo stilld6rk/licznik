@@ -37,13 +37,28 @@ def get_all_active_guild_configs() -> list:
 def save_guild_config(discord_guild_id: int, guild_name: str, ranking_channel_id: int,
                       role_id: int, admin_role_id: int = 0, member_role_id: int = 0,
                       limit: int = 4, env_key: str = None):
-    """Save or update config identified by ranking_channel_id (PK)."""
+    """Save or update config. Upserts by (discord_guild_id, guild_name) first,
+    then by ranking_channel_id, to avoid duplicate configs when channel changes."""
     session = get_session()
     try:
-        cfg = session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
+        # Look up by name first — handles re-runs of /setup_gildii with same guild name
+        cfg = session.query(GuildConfig).filter_by(
+            discord_guild_id=discord_guild_id, guild_name=guild_name
+        ).first()
+
+        if cfg and cfg.ranking_channel_id != ranking_channel_id:
+            # Channel changed — check if new channel already has a different config
+            conflict = session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
+            if conflict and conflict is not cfg:
+                session.delete(conflict)
+
+        if not cfg:
+            cfg = session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
+
         if cfg:
             cfg.discord_guild_id = discord_guild_id
             cfg.guild_name = guild_name
+            cfg.ranking_channel_id = ranking_channel_id
             cfg.role_id = role_id
             cfg.admin_role_id = admin_role_id
             cfg.member_role_id = member_role_id
@@ -61,6 +76,19 @@ def save_guild_config(discord_guild_id: int, guild_name: str, ranking_channel_id
             )
             session.add(cfg)
         session.commit()
+    finally:
+        session.close()
+
+
+def deactivate_guild_config(ranking_channel_id: int):
+    session = get_session()
+    try:
+        cfg = session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
+        if cfg:
+            cfg.is_active = False
+            session.commit()
+            return True
+        return False
     finally:
         session.close()
 

@@ -9,6 +9,7 @@ from db_helper import (
     get_all_logs_for_nick, get_corrections_for_nick, update_correction,
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
+    get_guild_configs_for_server,
 )
 from calculator import build_ranking_content
 from scraper import run_scraper
@@ -18,18 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _get_cfg(guild_id: int):
-    """Pobierz konfigurację guildu z DB lub użyj env vars jako fallback."""
-    cfg = get_guild_config(guild_id)
-    if cfg:
-        return cfg
-    # Legacy fallback — zwraca obiekt-like ze zmiennych środowiskowych
+def _env_fallback():
     class _Env:
         pass
     e = _Env()
-    e.guild_id = GUILD_ID
-    e.guild_name = GUILD_NAME
+    e.discord_guild_id = GUILD_ID
     e.ranking_channel_id = RANKING_CHANNEL_ID
+    e.guild_name = GUILD_NAME
     e.role_id = ROLE_ID
     e.admin_role_id = ADMIN_ROLE_ID
     e.member_role_id = MEMBER_ROLE_ID
@@ -37,10 +33,31 @@ def _get_cfg(guild_id: int):
     return e
 
 
+def _get_cfg(interaction: discord.Interaction, guild_name: str = None):
+    """Resolve game guild config from interaction context."""
+    configs = get_guild_configs_for_server(interaction.guild_id)
+    if not configs:
+        return _env_fallback()
+    if guild_name:
+        match = next((c for c in configs if c.guild_name.lower() == guild_name.strip().lower()), None)
+        return match or configs[0]
+    # Auto-detect by channel the command was issued in
+    chan_match = next((c for c in configs if c.ranking_channel_id == interaction.channel_id), None)
+    if chan_match:
+        return chan_match
+    return configs[0]
+
+
+def _resolve_game_guild_id(interaction: discord.Interaction, guild_name: str = None) -> int:
+    """Return the game guild ID (= ranking_channel_id) for DB calls."""
+    cfg = _get_cfg(interaction, guild_name)
+    return cfg.ranking_channel_id
+
+
 def is_admin(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
         return True
-    cfg = _get_cfg(interaction.guild_id)
+    cfg = _get_cfg(interaction)
     if cfg.admin_role_id:
         return any(r.id == cfg.admin_role_id for r in interaction.user.roles)
     return False
@@ -49,7 +66,7 @@ def is_admin(interaction: discord.Interaction) -> bool:
 def is_member(interaction: discord.Interaction) -> bool:
     if is_admin(interaction):
         return True
-    cfg = _get_cfg(interaction.guild_id)
+    cfg = _get_cfg(interaction)
     if cfg.member_role_id:
         return any(r.id == cfg.member_role_id for r in interaction.user.roles)
     return False
@@ -75,7 +92,7 @@ class HistoriaModal(discord.ui.Modal, title="Historia wpłat"):
         import asyncio
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(
-            None, get_all_logs_for_nick, self.nick.value.strip(), interaction.guild_id
+            None, get_all_logs_for_nick, self.nick.value.strip(), _resolve_game_guild_id(interaction)
         )
 
         if not data:
@@ -167,9 +184,9 @@ async def on_ready():
         auto_scrape.start()
 
 
-async def update_ranking(guild_id: int):
-    """Edytuj lub wyślij wiadomość rankingową dla konkretnego guildu."""
-    cfg = _get_cfg(guild_id)
+async def update_ranking(game_guild_id: int):
+    """Edytuj lub wyślij wiadomość rankingową. game_guild_id = ranking_channel_id."""
+    cfg = get_guild_config(game_guild_id)
     if not cfg or not cfg.ranking_channel_id:
         logger.warning(f"⚠️  Brak konfiguracji rankingu dla guildu {guild_id}")
         return
@@ -182,12 +199,12 @@ async def update_ranking(guild_id: int):
     import asyncio
     loop = asyncio.get_event_loop()
     content = await loop.run_in_executor(
-        None, build_ranking_content, guild_id, cfg.guild_name, cfg.limit
+        None, build_ranking_content, game_guild_id, cfg.guild_name, cfg.limit
     )
     view = RankingView()
 
     # 1. Try stored message ID from GuildConfig
-    msg_id = get_pinned_message_id_for(guild_id)
+    msg_id = get_pinned_message_id_for(game_guild_id)
     if msg_id:
         try:
             msg = await channel.fetch_message(int(msg_id))
@@ -196,14 +213,14 @@ async def update_ranking(guild_id: int):
             return
         except discord.NotFound:
             logger.warning(f"⚠️  [{cfg.guild_name}] Stara wiadomość usunięta, szukam w historii...")
-            save_pinned_message_id_for(guild_id, None)
+            save_pinned_message_id_for(game_guild_id, None)
 
     # 2. Scan last 50 messages in channel for bot's own message
     try:
         async for msg in channel.history(limit=50):
             if msg.author == bot.user:
                 await msg.edit(content=content, view=view)
-                save_pinned_message_id_for(guild_id, str(msg.id))
+                save_pinned_message_id_for(game_guild_id, str(msg.id))
                 logger.info(f"🔍 [{cfg.guild_name}] Znaleziono wiadomość {msg.id} w historii")
                 return
     except Exception as e:
@@ -211,7 +228,7 @@ async def update_ranking(guild_id: int):
 
     # 3. Send new message
     new_msg = await channel.send(content, view=view)
-    save_pinned_message_id_for(guild_id, str(new_msg.id))
+    save_pinned_message_id_for(game_guild_id, str(new_msg.id))
     logger.info(f"📤 [{cfg.guild_name}] Wysłano nową wiadomość {new_msg.id}")
 
 
@@ -220,10 +237,9 @@ async def update_all_rankings():
     configs = get_all_active_guild_configs()
     if configs:
         for cfg in configs:
-            await update_ranking(cfg.guild_id)
+            await update_ranking(cfg.ranking_channel_id)
     else:
-        # Legacy fallback
-        await update_ranking(GUILD_ID)
+        await update_ranking(RANKING_CHANNEL_ID)
 
 
 @tasks.loop(hours=1)
@@ -278,7 +294,7 @@ async def setup_gildii_command(
     await interaction.response.defer(ephemeral=True)
 
     save_guild_config(
-        guild_id=interaction.guild_id,
+        discord_guild_id=interaction.guild_id,
         guild_name=nazwa,
         ranking_channel_id=channel_id,
         role_id=role_id,
@@ -287,20 +303,18 @@ async def setup_gildii_command(
         limit=limit,
         env_key=env_klucz or nazwa,
     )
-    logger.info(f"⚙️  Setup guildu {interaction.guild_id} ({nazwa}) przez {interaction.user.name}")
+    logger.info(f"⚙️  Setup gildii {nazwa} ({channel_id}) przez {interaction.user.name}")
 
-    # Pobierz członków + scrapuj wpłaty od razu używając kredencjałów z env vars
     import asyncio
     from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db, _creds_for_guild
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, get_discord_members, interaction.guild_id, role_id)
+    await loop.run_in_executor(None, get_discord_members, channel_id, role_id)
     creds = _creds_for_guild(env_klucz or nazwa)
     records = await loop.run_in_executor(None, scrape_hard_logs, *creds)
     if records:
-        await loop.run_in_executor(None, save_scrape_to_db, records, interaction.guild_id)
+        await loop.run_in_executor(None, save_scrape_to_db, records, channel_id)
 
-    # Wyślij ranking z aktualnymi danymi
-    await update_ranking(interaction.guild_id)
+    await update_ranking(channel_id)
 
     embed = discord.Embed(title="✅ Gildia skonfigurowana!", color=discord.Color.green(), timestamp=datetime.now())
     embed.add_field(name="🏰 Gildia", value=f"**{nazwa}**", inline=True)
@@ -348,6 +362,7 @@ async def wpata_reczna_command(
 
         await interaction.response.defer(ephemeral=True)
 
+        game_guild_id = _resolve_game_guild_id(interaction)
         add_manual_correction(
             recipient_nick=recipient,
             amount=amount,
@@ -355,13 +370,13 @@ async def wpata_reczna_command(
             payer=payer,
             comment=reason,
             set_by=interaction.user.id,
-            guild_id=interaction.guild_id,
+            guild_id=game_guild_id,
         )
         logger.info(f"💳 {payer or '?'} → {recipient}: {amount}💎 ({reason})")
 
-        await update_ranking(interaction.guild_id)
+        await update_ranking(game_guild_id)
 
-        cfg = _get_cfg(interaction.guild_id)
+        cfg = _get_cfg(interaction)
         embed = discord.Embed(
             title="✅ Wpłata ręczna dodana" if amount > 0 else "✅ Wypłata ręczna dodana",
             color=discord.Color.green() if amount > 0 else discord.Color.red(),
@@ -402,7 +417,7 @@ async def ustaw_dolaczenie_command(interaction: discord.Interaction, nick: str, 
         await interaction.response.defer(ephemeral=True)
 
         from db_helper import update_member_join_date
-        update_member_join_date(nick, join_date, force=True, guild_id=interaction.guild_id)
+        update_member_join_date(nick, join_date, force=True, guild_id=_resolve_game_guild_id(interaction))
 
         embed = discord.Embed(title="✅ Data dołączenia ustawiona", color=discord.Color.blue(), timestamp=datetime.now())
         embed.add_field(name="🔹 Gracz", value=f"**{nick}**", inline=False)
@@ -428,7 +443,7 @@ async def week_off_command(interaction: discord.Interaction, is_off: bool):
 
         await interaction.response.defer(ephemeral=True)
         week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).replace(hour=0, minute=0, second=0)
-        set_week_off(week_start, is_off, guild_id=interaction.guild_id)
+        set_week_off(week_start, is_off, guild_id=_resolve_game_guild_id(interaction))
         status = "wyłączony" if is_off else "włączony"
         embed = discord.Embed(
             title=f"✅ Tydzień {status}",
@@ -456,17 +471,17 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
         await interaction.response.defer(ephemeral=True)
 
         if gildia:
-            configs = get_all_active_guild_configs()
+            configs = get_guild_configs_for_server(interaction.guild_id)
             match = next((c for c in configs if c.guild_name.lower() == gildia.strip().lower()), None)
             if not match:
                 names = ", ".join(c.guild_name for c in configs)
                 await interaction.followup.send(f"❌ Nie znaleziono gildii: **{gildia}**\nDostępne: {names}", ephemeral=True)
                 return
-            await update_ranking(match.guild_id)
+            await update_ranking(match.ranking_channel_id)
             cfg = match
         else:
-            await update_ranking(interaction.guild_id)
-            cfg = _get_cfg(interaction.guild_id)
+            cfg = _get_cfg(interaction)
+            await update_ranking(cfg.ranking_channel_id)
 
         embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
         embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
@@ -499,7 +514,7 @@ async def sync_scrape_command(interaction: discord.Interaction):
         await loop.run_in_executor(None, run_scraper)
         await update_all_rankings()
 
-        cfg = _get_cfg(interaction.guild_id)
+        cfg = _get_cfg(interaction)
         done_embed = discord.Embed(title="✅ Scraper ukończony", color=discord.Color.green(), timestamp=datetime.now())
         done_embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
         done_embed.add_field(name="📢 Kanał", value=f"<#{cfg.ranking_channel_id}>", inline=True)
@@ -523,7 +538,7 @@ async def historia_command(interaction: discord.Interaction, nick: str):
             return
         await interaction.response.defer(ephemeral=True)
 
-        data = get_all_logs_for_nick(nick.strip(), guild_id=interaction.guild_id)
+        data = get_all_logs_for_nick(nick.strip(), guild_id=_resolve_game_guild_id(interaction))
         if not data:
             await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
             return
@@ -584,7 +599,7 @@ async def members_command(interaction: discord.Interaction):
         if not is_member(interaction):
             await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
             return
-        members = get_all_active_members(guild_id=interaction.guild_id)
+        members = get_all_active_members(guild_id=_resolve_game_guild_id(interaction))
         embed = discord.Embed(
             title="📋 Członkowie gildii",
             description="\n".join(sorted(members)),
@@ -606,7 +621,7 @@ async def zaleglosci_command(interaction: discord.Interaction, member: str = Non
             await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
             return
         week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).replace(hour=0, minute=0, second=0)
-        corrections = get_corrections_for_week(week_start, guild_id=interaction.guild_id)
+        corrections = get_corrections_for_week(week_start, guild_id=_resolve_game_guild_id(interaction))
 
         if member:
             if member in corrections:
@@ -643,7 +658,7 @@ async def lista_wplat_command(interaction: discord.Interaction, nick: str):
             return
 
         await interaction.response.defer(ephemeral=True)
-        corrections = get_corrections_for_nick(nick.strip(), guild_id=interaction.guild_id)
+        corrections = get_corrections_for_nick(nick.strip(), guild_id=_resolve_game_guild_id(interaction))
 
         if not corrections:
             await interaction.followup.send(f"❌ Brak ręcznych wpłat dla: **{nick}**", ephemeral=True)
@@ -684,12 +699,13 @@ async def usun_wplate_command(interaction: discord.Interaction, id: int):
             return
 
         await interaction.response.defer(ephemeral=True)
-        ok = delete_correction(id, guild_id=interaction.guild_id)
+        game_guild_id = _resolve_game_guild_id(interaction)
+        ok = delete_correction(id, guild_id=game_guild_id)
         if not ok:
             await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
             return
 
-        await update_ranking(interaction.guild_id)
+        await update_ranking(game_guild_id)
         await interaction.followup.send(f"✅ Usunięto wpłatę ID:{id} i zaktualizowano ranking.", ephemeral=True)
 
     except Exception as e:
@@ -724,7 +740,7 @@ async def edytuj_wplate_command(interaction: discord.Interaction, id: int, kwota
             await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
             return
 
-        await update_ranking(interaction.guild_id)
+        await update_ranking(_resolve_game_guild_id(interaction))
 
         changes = []
         if kwota is not None:

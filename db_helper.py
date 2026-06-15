@@ -1,15 +1,27 @@
 from sqlalchemy import func
 from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig
-from config import GUILD_ID
+from config import GUILD_ID, RANKING_CHANNEL_ID
 from datetime import datetime, timedelta
 
 
 # ── Guild config ───────────────────────────────────────────────────────────────
 
-def get_guild_config(guild_id: int):
+def get_guild_config(ranking_channel_id: int):
+    """Get config by game guild ID (= ranking_channel_id)."""
     session = get_session()
     try:
-        return session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        return session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
+    finally:
+        session.close()
+
+
+def get_guild_configs_for_server(discord_guild_id: int) -> list:
+    """Get all active configs for a Discord server."""
+    session = get_session()
+    try:
+        return session.query(GuildConfig).filter_by(
+            discord_guild_id=discord_guild_id, is_active=True
+        ).all()
     finally:
         session.close()
 
@@ -22,15 +34,16 @@ def get_all_active_guild_configs() -> list:
         session.close()
 
 
-def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
+def save_guild_config(discord_guild_id: int, guild_name: str, ranking_channel_id: int,
                       role_id: int, admin_role_id: int = 0, member_role_id: int = 0,
                       limit: int = 4, env_key: str = None):
+    """Save or update config identified by ranking_channel_id (PK)."""
     session = get_session()
     try:
-        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        cfg = session.query(GuildConfig).filter_by(ranking_channel_id=ranking_channel_id).first()
         if cfg:
+            cfg.discord_guild_id = discord_guild_id
             cfg.guild_name = guild_name
-            cfg.ranking_channel_id = ranking_channel_id
             cfg.role_id = role_id
             cfg.admin_role_id = admin_role_id
             cfg.member_role_id = member_role_id
@@ -39,8 +52,9 @@ def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
             cfg.is_active = True
         else:
             cfg = GuildConfig(
-                guild_id=guild_id, guild_name=guild_name,
                 ranking_channel_id=ranking_channel_id,
+                discord_guild_id=discord_guild_id,
+                guild_name=guild_name,
                 role_id=role_id, admin_role_id=admin_role_id,
                 member_role_id=member_role_id, limit=limit,
                 env_key=env_key or guild_name,
@@ -51,19 +65,21 @@ def save_guild_config(guild_id: int, guild_name: str, ranking_channel_id: int,
         session.close()
 
 
-def get_pinned_message_id_for(guild_id: int) -> str | None:
+def get_pinned_message_id_for(game_guild_id: int) -> str | None:
+    """game_guild_id = ranking_channel_id"""
     session = get_session()
     try:
-        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        cfg = session.query(GuildConfig).filter_by(ranking_channel_id=game_guild_id).first()
         return cfg.pinned_message_id if cfg else None
     finally:
         session.close()
 
 
-def save_pinned_message_id_for(guild_id: int, message_id: str | None):
+def save_pinned_message_id_for(game_guild_id: int, message_id: str | None):
+    """game_guild_id = ranking_channel_id"""
     session = get_session()
     try:
-        cfg = session.query(GuildConfig).filter_by(guild_id=guild_id).first()
+        cfg = session.query(GuildConfig).filter_by(ranking_channel_id=game_guild_id).first()
         if cfg:
             cfg.pinned_message_id = message_id
             session.commit()
@@ -371,8 +387,8 @@ def _get_all_member_info(guild_id: int = None) -> dict:
 
 # Legacy helpers — kept for backward compat with old env-var single-guild deploys
 def get_pinned_message_id() -> str | None:
-    return get_pinned_message_id_for(GUILD_ID)
+    return get_pinned_message_id_for(RANKING_CHANNEL_ID)
 
 
 def save_pinned_message_id(message_id: str | None):
-    save_pinned_message_id_for(GUILD_ID, message_id)
+    save_pinned_message_id_for(RANKING_CHANNEL_ID, message_id)

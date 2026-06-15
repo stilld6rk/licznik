@@ -18,10 +18,14 @@ def oczysc_nick_v(nick):
     return re.sub(r'[Vv]\d+$', '', str(nick)).strip()
 
 
-def get_discord_members(guild_id: int = None, role_id: int = None):
-    """Pobierz listę członków z roli Discord dla danego guildu"""
+def get_discord_members(guild_id: int = None, role_id: int = None, game_guild_id: int = None):
+    """Pobierz listę członków z roli Discord.
+    guild_id = Discord server ID (for API call)
+    game_guild_id = ranking_channel_id (for DB storage, defaults to guild_id for legacy)
+    """
     gid = guild_id or GUILD_ID
     rid = role_id or ROLE_ID
+    db_gid = game_guild_id or gid  # use channel-based ID for DB
     headers = {"Authorization": f"Bot {BOT_TOKEN}"}
     url = f"https://discord.com/api/v10/guilds/{gid}/members?limit=1000"
 
@@ -48,8 +52,8 @@ def get_discord_members(guild_id: int = None, role_id: int = None):
                 game_nick = dc_nick
                 if game_nick in ["SKUTABABA", "SKUTYSIURAS", "ASPIRIN"]:
                     game_nick = "SKUTY SZKIELET"
-                get_or_create_member(game_nick, user.get('id'), guild_id=gid)
-                _update_discord_nick(game_nick, dc_nick, guild_id=gid)
+                get_or_create_member(game_nick, user.get('id'), guild_id=db_gid)
+                _update_discord_nick(game_nick, dc_nick, guild_id=db_gid)
                 members.append(game_nick)
                 logger.info(f"  ✅ Znaleziono członka z rolą: {dc_nick}")
         else:
@@ -63,7 +67,7 @@ def get_discord_members(guild_id: int = None, role_id: int = None):
     session = get_session()
     try:
         old_with_role = session.query(GuildMember).filter(
-            GuildMember.guild_id == gid,
+            GuildMember.guild_id == db_gid,
             GuildMember.discord_id.isnot(None)
         ).all()
         removed = [m for m in old_with_role if m.nick not in current]
@@ -243,8 +247,9 @@ def run_scraper():
     # Jedno logowanie na unikalny zestaw kredencjałów
     seen_creds = {}  # (login, password, pin) → records
     for cfg in configs:
-        logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({cfg.guild_id})")
-        get_discord_members(cfg.guild_id, cfg.role_id)
+        game_guild_id = cfg.ranking_channel_id
+        logger.info(f"👥 Aktualizuję członków: {cfg.guild_name} ({game_guild_id})")
+        get_discord_members(cfg.discord_guild_id, cfg.role_id, game_guild_id=game_guild_id)
 
         creds = _creds_for_guild(cfg.env_key or cfg.guild_name)
         if creds not in seen_creds:
@@ -254,7 +259,7 @@ def run_scraper():
         records = seen_creds[creds]
         if records:
             logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
-            save_scrape_to_db(records, cfg.guild_id)
+            save_scrape_to_db(records, game_guild_id)
 
     logger.info("✅ Scraper ukończony")
 

@@ -113,6 +113,9 @@ def get_all_active_members(guild_id: int = None) -> list:
         members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
+        ).filter(
+            (GuildMember.discord_id.isnot(None)) |
+            (GuildMember.corrections.any())
         ).all()
         return [m.nick for m in members]
     finally:
@@ -371,6 +374,9 @@ def _get_all_member_info(guild_id: int = None) -> dict:
         members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
+        ).filter(
+            (GuildMember.discord_id.isnot(None)) |
+            (GuildMember.corrections.any())
         ).all()
         return {
             m.nick: {

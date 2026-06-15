@@ -117,6 +117,34 @@ def save_pinned_message_id_for(game_guild_id: int, message_id: str | None):
 
 # ── Members ────────────────────────────────────────────────────────────────────
 
+def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
+    """Rename a member and merge into existing record if new_nick already exists.
+    Returns 'renamed', 'merged', or 'not_found'."""
+    gid = guild_id or GUILD_ID
+    session = get_session()
+    try:
+        old = session.query(GuildMember).filter_by(guild_id=gid, nick=old_nick).first()
+        if not old:
+            return 'not_found'
+        existing = session.query(GuildMember).filter_by(guild_id=gid, nick=new_nick).first()
+        if existing and existing.id != old.id:
+            # Merge: move all payments and corrections from old → existing, then delete old
+            from database import Payment, ManualCorrection
+            session.query(Payment).filter_by(member_id=old.id).update({'member_id': existing.id})
+            session.query(ManualCorrection).filter_by(recipient_id=old.id).update({'recipient_id': existing.id})
+            if old.discord_id and not existing.discord_id:
+                existing.discord_id = old.discord_id
+            if old.join_date and not existing.join_date:
+                existing.join_date = old.join_date
+            session.delete(old)
+            session.commit()
+            return 'merged'
+        old.nick = new_nick
+        session.commit()
+        return 'renamed'
+    finally:
+        session.close()
+
 def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None) -> GuildMember:
     gid = guild_id or GUILD_ID
     session = get_session()

@@ -9,7 +9,7 @@ from db_helper import (
     get_all_logs_for_nick, get_corrections_for_nick, update_correction,
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
-    get_guild_configs_for_server, deactivate_guild_config,
+    get_guild_configs_for_server, deactivate_guild_config, rename_member,
 )
 from calculator import build_ranking_content
 from scraper import run_scraper
@@ -441,6 +441,23 @@ async def wpata_reczna_command(
             await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
         except Exception:
             pass
+
+
+@bot.tree.command(name="zmień_nick", description="[ADMIN] Zmień/popraw nick gracza w bazie danych")
+@app_commands.describe(stary_nick="Obecna nazwa w bazie", nowy_nick="Nowa/poprawiona nazwa")
+async def zmien_nick_command(interaction: discord.Interaction, stary_nick: str, nowy_nick: str):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Tylko admini mogą to robić.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    gid = _resolve_game_guild_id(interaction)
+    result = rename_member(stary_nick, nowy_nick, guild_id=gid)
+    if result == 'not_found':
+        await interaction.followup.send(f"❌ Nie znaleziono gracza `{stary_nick}` w tej gildii.", ephemeral=True)
+    elif result == 'merged':
+        await interaction.followup.send(f"✅ Scalono `{stary_nick}` → `{nowy_nick}` (wpłaty i korekty przeniesione).", ephemeral=True)
+    else:
+        await interaction.followup.send(f"✅ Zmieniono nick: `{stary_nick}` → `{nowy_nick}`.", ephemeral=True)
 
 
 @bot.tree.command(name="ustaw_dołączenie", description="[ADMIN] Ustaw datę dołączenia członka")

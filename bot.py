@@ -242,7 +242,7 @@ async def update_all_rankings():
         await update_ranking(RANKING_CHANNEL_ID)
 
 
-@tasks.loop(hours=1)
+@tasks.loop(hours=24)
 async def auto_scrape():
     logger.info("🔄 Auto-scraper uruchomiony")
     import asyncio

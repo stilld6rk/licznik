@@ -605,10 +605,10 @@ async def sync_scrape_command(interaction: discord.Interaction):
 @bot.tree.command(name="ranking_ogolny", description="Pokaż ogólny ranking wpłat (suma od początku)")
 async def ranking_ogolny_command(interaction: discord.Interaction):
     try:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         cfg = _get_cfg(interaction)
         content = build_overall_ranking_content(cfg.ranking_channel_id, cfg.guild_name)
-        await interaction.followup.send(content)
+        await interaction.followup.send(content, ephemeral=True)
     except Exception as e:
         logger.error(f"❌ Błąd ranking_ogolny: {e}")
         await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)

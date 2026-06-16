@@ -11,7 +11,7 @@ from db_helper import (
     save_guild_config, get_guild_config, get_all_active_guild_configs,
     get_guild_configs_for_server, deactivate_guild_config, rename_member,
 )
-from calculator import build_ranking_content
+from calculator import build_ranking_content, build_overall_ranking_content
 from scraper import run_scraper
 import logging
 
@@ -601,6 +601,18 @@ async def sync_scrape_command(interaction: discord.Interaction):
 
 
 # ── Member commands ────────────────────────────────────────────────────────────
+
+@bot.tree.command(name="ranking_ogolny", description="Pokaż ogólny ranking wpłat (suma od początku)")
+async def ranking_ogolny_command(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer()
+        cfg = _get_cfg(interaction)
+        content = build_overall_ranking_content(cfg.ranking_channel_id, cfg.guild_name)
+        await interaction.followup.send(content)
+    except Exception as e:
+        logger.error(f"❌ Błąd ranking_ogolny: {e}")
+        await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+
 
 @bot.tree.command(name="historia", description="Pokaż historię wpłat dla gracza")
 @app_commands.describe(nick="Nick gracza (z gry lub Discord)")

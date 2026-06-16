@@ -159,6 +159,45 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
     return content + footer
 
 
+def build_overall_ranking_content(guild_id: int = None, guild_name: str = None) -> str:
+    """Suma wszystkich wpłat + korekt per gracz, od początku śledzenia."""
+    gid = guild_id or GUILD_ID
+    gname = guild_name or GUILD_NAME
+
+    lista_dc = get_all_active_members(gid)
+    payments_grouped = get_all_payments_grouped(gid)
+    corrections_grouped = get_all_corrections_grouped(gid)
+    member_info_map = _get_all_member_info(gid)
+
+    totals = {nick: 0 for nick in lista_dc}
+    for week_data in payments_grouped.values():
+        for nick, val in week_data.items():
+            if nick in totals:
+                totals[nick] += val
+    for week_data in corrections_grouped.values():
+        for nick, val in week_data.items():
+            if nick in totals:
+                totals[nick] += val
+
+    posortowani = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"💎 RANKING OGÓLNY — {gname} (suma od początku)"]
+    for idx, (nick, total) in enumerate(posortowani):
+        display = member_info_map.get(nick, {}).get('discord_nick', nick)
+        ikona = medals[idx] if idx < 3 else "🔹"
+        lines.append(f"{ikona} {display}: {int(total)}💎")
+
+    footer = f"\n🕐 Stan na: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    content = "\n".join(lines)
+    max_len = 2000 - len(footer)
+    if len(content) > max_len:
+        cutoff = content.rfind("\n", 0, max_len - 30)
+        remaining = content[cutoff:].count("\n")
+        content = content[:cutoff] + f"\n*... i {remaining} więcej*"
+    return content + footer
+
+
 # backward compat
 def run_week_calc_and_send(week_start: datetime):
     pass

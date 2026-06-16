@@ -73,12 +73,14 @@ def get_discord_members(guild_id: int = None, role_id: int = None, game_guild_id
     logger.info(f"📋 Znaleziono {len(current)} członków z rolą {rid}")
 
     # Wyczyść discord_id dla członków którzy utracili rolę
+    # discord_id=0 = dodani przez /wpłata_ręczna — nie dotykamy ich
     from database import get_session, GuildMember
     session = get_session()
     try:
         old_with_role = session.query(GuildMember).filter(
             GuildMember.guild_id == db_gid,
-            GuildMember.discord_id.isnot(None)
+            GuildMember.discord_id.isnot(None),
+            GuildMember.discord_id != 0,
         ).all()
         removed = [m for m in old_with_role if m.nick not in current]
         for m in removed:
@@ -192,6 +194,8 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             )
 
             logger.info(f"✅ Przetworzono {len(df)} wpisów łącznie")
+            unikalne_nicki = sorted(df['Nazwa członka'].unique())
+            logger.info(f"👤 Unikalne nicki w logach ({len(unikalne_nicki)}): {unikalne_nicki}")
             return df.to_dict('records')
 
         except Exception as e:
@@ -207,14 +211,23 @@ def save_scrape_to_db(records: list, guild_id: int = None):
     from database import get_session, Payment, GuildMember
     gid = guild_id or GUILD_ID
     saved = 0
-    skipped = 0
+    skipped_dup = 0
+    skipped_no_member = 0
+    no_member_nicks = set()
+
+    logger.info(f"[Guild {gid}] 📥 Otrzymano {len(records)} wpisów do zapisania")
+    for r in records[:10]:
+        logger.info(f"  📝 przykład: nick={r.get('Nazwa członka')!r}, ilość={r.get('Ilość')}, "
+                    f"przedmiot={r.get('Przedmiot')!r}, data={r.get('Data')}")
+
     for record in records:
         try:
             session = get_session()
             member = session.query(GuildMember).filter_by(guild_id=gid, nick=record['Nazwa członka']).first()
             if not member:
                 session.close()
-                skipped += 1
+                skipped_no_member += 1
+                no_member_nicks.add(record['Nazwa członka'])
                 continue
             exists = session.query(Payment).filter_by(
                 member_id=member.id,
@@ -231,12 +244,16 @@ def save_scrape_to_db(records: list, guild_id: int = None):
                     guild_id=gid,
                 )
                 saved += 1
+                logger.info(f"  💾 zapisano: {record['Nazwa członka']} +{int(record['Ilość'])}💎 "
+                            f"({record['Przedmiot']}) {record['Data']}")
             else:
-                skipped += 1
+                skipped_dup += 1
         except Exception as e:
             logger.error(f"❌ Błąd przy zapisie wpłaty {record.get('Nazwa członka')}: {e}")
 
-    logger.info(f"[Guild {gid}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped}")
+    if no_member_nicks:
+        logger.warning(f"[Guild {gid}] ⚠️  Nicki bez rekordu członka w tej gildii (pominięto {skipped_no_member} wpisów): {sorted(no_member_nicks)}")
+    logger.info(f"[Guild {gid}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped_dup} duplikatów, {skipped_no_member} bez członka")
 
 
 def run_scraper():

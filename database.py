@@ -18,6 +18,7 @@ class GuildMember(Base):
     discord_id = Column(BigInteger, nullable=True)
     join_date = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
+    added_manually = Column(Boolean, nullable=False, default=False)  # created via /wpłata_ręczna, exempt from role-loss cleanup
 
     __table_args__ = (UniqueConstraint('guild_id', 'nick', name='uq_guild_nick'),)
 
@@ -146,6 +147,14 @@ def init_db():
             """UPDATE guild_members SET discord_id = 0
                WHERE discord_id IS NULL
                AND id IN (SELECT DISTINCT recipient_id FROM manual_corrections)""",
+            # Explicit flag for manually-added members instead of overloading discord_id=0.
+            # Only flag members with discord_id=0 AND no scraped payment history — members
+            # with real payments are legacy scraped junk, not /wpłata_ręczna entries, and
+            # must remain eligible for role-loss cleanup.
+            "ALTER TABLE guild_members ADD COLUMN IF NOT EXISTS added_manually BOOLEAN NOT NULL DEFAULT false",
+            """UPDATE guild_members SET added_manually = true
+               WHERE discord_id = 0
+               AND id NOT IN (SELECT DISTINCT member_id FROM payments)""",
             # Deactivate duplicate configs: keep only the latest ranking_channel_id per (discord_guild_id, guild_name)
             """UPDATE guild_configs SET is_active = false
                WHERE is_active = true

@@ -9,7 +9,7 @@ from db_helper import (
     get_all_logs_for_nick, get_corrections_for_nick, update_correction,
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
-    get_guild_configs_for_server, deactivate_guild_config, rename_member,
+    get_guild_configs_for_server, deactivate_guild_config, rename_member, deactivate_member,
 )
 from calculator import build_ranking_content, build_overall_ranking_content
 from scraper import run_scraper
@@ -458,6 +458,21 @@ async def zmien_nick_command(interaction: discord.Interaction, stary_nick: str, 
         await interaction.followup.send(f"✅ Scalono `{stary_nick}` → `{nowy_nick}` (wpłaty i korekty przeniesione).", ephemeral=True)
     else:
         await interaction.followup.send(f"✅ Zmieniono nick: `{stary_nick}` → `{nowy_nick}`.", ephemeral=True)
+
+
+@bot.tree.command(name="usun_gracza", description="[ADMIN] Usuń gracza z rankingu tej gildii (zachowuje historię)")
+@app_commands.describe(nick="Nick gracza do usunięcia z rankingu tej gildii")
+async def usun_gracza_command(interaction: discord.Interaction, nick: str):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Tylko admini mogą to robić.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    gid = _resolve_game_guild_id(interaction)
+    ok = deactivate_member(nick.strip(), guild_id=gid)
+    if ok:
+        await interaction.followup.send(f"✅ `{nick}` usunięty z rankingu tej gildii (historia zachowana).", ephemeral=True)
+    else:
+        await interaction.followup.send(f"❌ Nie znaleziono gracza `{nick}` w tej gildii.", ephemeral=True)
 
 
 @bot.tree.command(name="ustaw_dołączenie", description="[ADMIN] Ustaw datę dołączenia członka")

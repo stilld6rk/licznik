@@ -117,6 +117,21 @@ def save_pinned_message_id_for(game_guild_id: int, message_id: str | None):
 
 # ── Members ────────────────────────────────────────────────────────────────────
 
+def deactivate_member(nick: str, guild_id: int = None) -> bool:
+    """Mark a member inactive in a specific guild (hides from ranking, keeps history)."""
+    gid = guild_id or GUILD_ID
+    session = get_session()
+    try:
+        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
+        if not member:
+            return False
+        member.is_active = False
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
 def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
     """Rename a member and merge into existing record if new_nick already exists.
     Returns 'renamed', 'merged', or 'not_found'."""
@@ -145,17 +160,20 @@ def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
     finally:
         session.close()
 
-def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None) -> GuildMember:
+def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None,
+                         added_manually: bool = False) -> GuildMember:
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
         member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
-            member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id)
+            member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id, added_manually=added_manually)
             session.add(member)
             session.commit()
-        elif discord_id is not None and member.discord_id is None:
+        elif discord_id and not member.discord_id and not added_manually:
+            # Real Discord role scrape found this nick — promote from manual placeholder to real member
             member.discord_id = discord_id
+            member.added_manually = False
             session.commit()
         return member
     finally:
@@ -241,8 +259,9 @@ def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        # discord_id=0 so the member passes the discord_id IS NOT NULL filter
-        recipient = get_or_create_member(recipient_nick, discord_id=0, guild_id=gid)
+        # discord_id=0 so the member passes the discord_id IS NOT NULL filter; added_manually
+        # exempts them from the role-loss cleanup so /wpłata_ręczna members never get auto-hidden
+        recipient = get_or_create_member(recipient_nick, discord_id=0, guild_id=gid, added_manually=True)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
             recipient_id=recipient.id, payer=payer, amount=amount,

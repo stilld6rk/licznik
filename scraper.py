@@ -73,14 +73,14 @@ def get_discord_members(guild_id: int = None, role_id: int = None, game_guild_id
     logger.info(f"📋 Znaleziono {len(current)} członków z rolą {rid}")
 
     # Wyczyść discord_id dla członków którzy utracili rolę
-    # discord_id=0 = dodani przez /wpłata_ręczna — nie dotykamy ich
+    # added_manually=True = dodani przez /wpłata_ręczna — nie dotykamy ich
     from database import get_session, GuildMember
     session = get_session()
     try:
         old_with_role = session.query(GuildMember).filter(
             GuildMember.guild_id == db_gid,
             GuildMember.discord_id.isnot(None),
-            GuildMember.discord_id != 0,
+            GuildMember.added_manually == False,
         ).all()
         removed = [m for m in old_with_role if m.nick not in current]
         for m in removed:

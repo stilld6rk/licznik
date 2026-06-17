@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, time as dtime
 from config import DISCORD_BOT_TOKEN, GUILD_ID, ROLE_ID, ADMIN_ROLE_ID, MEMBER_ROLE_ID, GOLD, ORANGE, RED, GREEN, RANKING_CHANNEL_ID, GUILD_NAME
 from db_helper import (
     get_or_create_member, add_manual_correction, get_all_active_members,
@@ -199,7 +199,7 @@ async def update_all_rankings():
         await update_ranking(RANKING_CHANNEL_ID)
 
 
-@tasks.loop(hours=24)
+@tasks.loop(time=dtime(hour=4, minute=0, tzinfo=timezone.utc))
 async def auto_scrape():
     logger.info("🔄 Auto-scraper uruchomiony")
     import asyncio

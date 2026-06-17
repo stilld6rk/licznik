@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig
 from config import GUILD_ID, RANKING_CHANNEL_ID
 from datetime import datetime, timedelta
@@ -352,19 +352,36 @@ def get_all_payments_grouped(guild_id: int = None) -> dict:
         if not nicks:
             return {}
 
-        # Sum ALL payments for these nicks regardless of which guild logged them
+        # Get member IDs for these nicks (to also catch old payments with nick=NULL)
+        member_ids = [m.id for m in members]
+
+        # Sum ALL payments for these nicks regardless of which guild logged them.
+        # Match by nick (case-insensitive) OR member_id to cover old rows with nick=NULL.
+        lower_nicks = [n.lower() for n in nicks]
         results = session.query(
             Payment.week_start,
             Payment.nick,
+            Payment.member_id,
             func.sum(Payment.amount).label('total')
         ).filter(
-            Payment.nick.in_(nicks)
-        ).group_by(Payment.week_start, Payment.nick).all()
+            or_(
+                func.lower(Payment.nick).in_(lower_nicks),
+                Payment.member_id.in_(member_ids),
+            )
+        ).group_by(Payment.week_start, Payment.nick, Payment.member_id).all()
+
+        # Build a member_id → nick lookup so NULL-nick rows get mapped correctly
+        id_to_nick = {m.id: m.nick for m in members}
 
         grouped = {}
-        for week_start, nick, total in results:
+        for week_start, p_nick, member_id, total in results:
+            resolved_nick = p_nick or id_to_nick.get(member_id)
+            if not resolved_nick:
+                continue
+            # Normalise to the canonical nick stored in guild_members
+            canonical = next((n for n in nicks if n.lower() == resolved_nick.lower()), resolved_nick)
             ws = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
-            grouped.setdefault(ws, {})[nick] = float(total or 0)
+            grouped.setdefault(ws, {})[canonical] = grouped.get(ws, {}).get(canonical, 0) + float(total or 0)
         return grouped
     finally:
         session.close()
@@ -398,9 +415,9 @@ def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
         member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
             return None
-        # All payments for this nick across all source guilds
+        # All payments for this nick — match by nick column OR member_id (catches old rows with nick=NULL)
         payments = session.query(Payment).filter(
-            Payment.nick == nick
+            or_(func.lower(Payment.nick) == nick.lower(), Payment.member_id == member.id)
         ).order_by(Payment.date.desc()).all()
         corrections = session.query(ManualCorrection).filter_by(
             recipient_id=member.id

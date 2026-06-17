@@ -188,6 +188,7 @@ def get_all_active_members(guild_id: int = None) -> list:
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
         ).all()
         return [m.nick for m in members]
     finally:
@@ -259,13 +260,12 @@ def add_payment(nick: str, amount: float, date: datetime, item_name: str = None,
 
 def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
                           payer: str = None, comment: str = None, set_by: int = None,
-                          guild_id: int = None):
+                          guild_id: int = None, discord_id: int = None):
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        # discord_id=0 so the member passes the discord_id IS NOT NULL filter; added_manually
-        # exempts them from the role-loss cleanup so /wpłata_ręczna members never get auto-hidden
-        recipient = get_or_create_member(recipient_nick, discord_id=0, guild_id=gid, added_manually=True)
+        # added_manually exempts from role-loss cleanup; use real discord_id when available
+        recipient = get_or_create_member(recipient_nick, discord_id=discord_id or 0, guild_id=gid, added_manually=True)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
             recipient_id=recipient.id, payer=payer, amount=amount,
@@ -346,6 +346,7 @@ def get_all_payments_grouped(guild_id: int = None) -> dict:
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
         ).all()
         nicks = [m.nick for m in members]
         if not nicks:
@@ -382,6 +383,7 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
         ).all()
         nicks = [m.nick for m in members]
         if not nicks:
@@ -495,6 +497,7 @@ def get_corrections_with_comments(week_start: datetime, guild_id: int = None) ->
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
         ).all()
         nicks = [m.nick for m in members]
         if not nicks:
@@ -523,6 +526,7 @@ def _get_all_member_info(guild_id: int = None) -> dict:
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
             GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
         ).all()
         return {
             m.nick: {

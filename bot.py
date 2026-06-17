@@ -351,6 +351,16 @@ async def wpata_reczna_command(
 
         await interaction.response.defer(ephemeral=True)
 
+        # Try to find the recipient in Discord by display name / nick (case-insensitive)
+        discord_id_for_recipient = None
+        if interaction.guild:
+            needle = recipient.lower()
+            for m in interaction.guild.members:
+                dc_nick = (m.nick or m.display_name or m.name or '').lower()
+                if dc_nick == needle or m.name.lower() == needle:
+                    discord_id_for_recipient = m.id
+                    break
+
         game_guild_id = _resolve_game_guild_id(interaction)
         add_manual_correction(
             recipient_nick=recipient,
@@ -360,8 +370,9 @@ async def wpata_reczna_command(
             comment=reason,
             set_by=interaction.user.id,
             guild_id=game_guild_id,
+            discord_id=discord_id_for_recipient,
         )
-        logger.info(f"💳 {payer or '?'} → {recipient}: {amount}💎 ({reason})")
+        logger.info(f"💳 {payer or '?'} → {recipient}: {amount}💎 ({reason}) [discord_id={discord_id_for_recipient}]")
 
         await update_ranking(game_guild_id)
 

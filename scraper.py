@@ -231,27 +231,34 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
         try:
             session = get_session()
 
-            # Dedup by (nick, date, amount) — same timestamp+amount = same physical payment
-            # regardless of which guild's log the scraper read it from
-            exists = session.query(Payment).filter_by(
-                nick=nick, date=date, amount=amount
-            ).first()
-            if exists:
-                session.close()
-                skipped_dup += 1
-                continue
-
-            # Find member in current guild; fall back to any guild so payment is still recorded
+            # Find member first (needed for member_id-based dedup of old rows with nick=NULL)
             member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
             if not member:
                 member = session.query(GuildMember).filter_by(nick=nick).first()
 
-            member_guild_id = member.guild_id if member else None
-            session.close()
-
-            if not member_guild_id:
+            if not member:
+                session.close()
                 skipped_no_member += 1
                 no_member_nicks.add(nick)
+                continue
+
+            member_guild_id = member.guild_id
+            member_id = member.id
+
+            # Dedup: same date+amount for this nick OR this member_id (covers old rows where nick=NULL)
+            from sqlalchemy import or_ as sa_or
+            exists = session.query(Payment).filter(
+                Payment.date == date,
+                Payment.amount == amount,
+                sa_or(
+                    Payment.nick == nick,
+                    Payment.member_id == member_id,
+                )
+            ).first()
+            session.close()
+
+            if exists:
+                skipped_dup += 1
                 continue
 
             add_payment(

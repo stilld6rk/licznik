@@ -53,7 +53,8 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
         info = member_info_map.get(nick)
         if info and info.get('join_date'):
             jd = info['join_date']
-            return (jd - timedelta(days=jd.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            jw = (jd - timedelta(days=jd.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            return max(jw, START_DATE)  # never accumulate debt before tracking started
         return START_DATE
 
     earliest = min((_join_week(n) for n in lista_dc), default=START_DATE)

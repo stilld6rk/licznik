@@ -245,9 +245,11 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
             member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
             if not member:
                 member = session.query(GuildMember).filter_by(nick=nick).first()
+
+            member_guild_id = member.guild_id if member else None
             session.close()
 
-            if not member:
+            if not member_guild_id:
                 skipped_no_member += 1
                 no_member_nicks.add(nick)
                 continue
@@ -257,7 +259,7 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
                 amount=amount,
                 date=date,
                 item_name=record['Przedmiot'],
-                guild_id=member.guild_id,
+                guild_id=member_guild_id,
                 source_guild_name=src,
             )
             saved += 1

@@ -10,6 +10,7 @@ from db_helper import (
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
     get_guild_configs_for_server, deactivate_guild_config, rename_member, deactivate_member,
+    clear_all_payments,
 )
 from calculator import build_ranking_content, build_overall_ranking_content
 from scraper import run_scraper
@@ -571,6 +572,61 @@ async def sync_scrape_command(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Błąd: {str(e)}")
 
 
+class ResetScrapeConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.confirmed = False
+
+    @discord.ui.button(label="✅ Tak, wyczyść i scrapuj", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Tylko Administrator.", ephemeral=True)
+            return
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer(ephemeral=True)
+
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        deleted = await loop.run_in_executor(None, clear_all_payments)
+        logger.info(f"🗑️ reset_scrape: usunięto {deleted} wpisów z payments")
+
+        await interaction.followup.send(
+            f"🗑️ Usunięto **{deleted}** wpisów wpłat z gry. Scrapuję od nowa...",
+            ephemeral=True
+        )
+
+        await loop.run_in_executor(None, run_scraper)
+        await update_all_rankings()
+
+        await interaction.followup.send("✅ Scraper ukończony — dane odświeżone poprawnie.", ephemeral=True)
+
+    @discord.ui.button(label="❌ Anuluj", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Anulowano.", view=None)
+
+
+@bot.tree.command(name="reset_scrape", description="[ADMIN SERWERA] Wyczyść wszystkie scraped wpłaty i scrapuj od nowa")
+async def reset_scrape_command(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Tylko Administrator serwera może to robić.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="⚠️ Uwaga — operacja nieodwracalna",
+        description=(
+            "Ta komenda usunie **wszystkie wpłaty z gry** (tabela `payments`) ze wszystkich gildii "
+            "i wykona ponowne scrapowanie.\n\n"
+            "**Wpłaty ręczne (`/wpłata_ręczna`) NIE zostaną usunięte.**\n\n"
+            "Użyj tego gdy dane są zduplikowane między gildiami po zmianie konfiguracji."
+        ),
+        color=discord.Color.red(),
+    )
+    await interaction.response.send_message(embed=embed, view=ResetScrapeConfirmView(), ephemeral=True)
+
+
 # ── Member commands ────────────────────────────────────────────────────────────
 
 @bot.tree.command(name="ranking_ogolny", description="Pokaż ogólny ranking wpłat (suma od początku)")
@@ -705,7 +761,8 @@ async def pomoc_command(interaction: discord.Interaction):
         value=(
             "`/setup_gildii <nazwa> <kanal_id> <rola_id> ...` — Skonfiguruj gildię\n"
             "`/lista_gildii` — Pokaż wszystkie aktywne konfiguracje gildii\n"
-            "`/deaktywuj_gildie <kanal_id>` — Deaktywuj konfigurację gildii"
+            "`/deaktywuj_gildie <kanal_id>` — Deaktywuj konfigurację gildii\n"
+            "`/reset_scrape` — Wyczyść wszystkie scraped wpłaty i scrapuj od nowa (naprawa duplikatów)"
         ),
         inline=False
     )

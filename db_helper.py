@@ -407,6 +407,18 @@ def get_corrections_for_nick(nick: str, guild_id: int = None) -> list:
         session.close()
 
 
+def clear_all_payments() -> int:
+    """Delete all rows from the payments table. Manual corrections are NOT touched.
+    Returns the number of deleted rows."""
+    session = get_session()
+    try:
+        deleted = session.query(Payment).delete()
+        session.commit()
+        return deleted
+    finally:
+        session.close()
+
+
 def update_correction(correction_id: int, amount: float = None, comment: str = None) -> bool:
     session = get_session()
     try:

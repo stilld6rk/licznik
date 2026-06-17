@@ -378,16 +378,28 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        results = session.query(ManualCorrection).join(GuildMember).filter(
-            GuildMember.guild_id == gid
+        members = session.query(GuildMember).filter(
+            GuildMember.guild_id == gid,
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None),
         ).all()
+        nicks = [m.nick for m in members]
+        if not nicks:
+            return {}
+        lower_nicks = [n.lower() for n in nicks]
+        nick_map = {n.lower(): n for n in nicks}
+
+        results = session.query(ManualCorrection).join(GuildMember).filter(
+            func.lower(GuildMember.nick).in_(lower_nicks)
+        ).all()
+
         grouped = {}
         for corr in results:
+            canonical = nick_map.get((corr.recipient.nick or '').lower())
+            if not canonical:
+                continue
             ws = corr.week_start.replace(hour=0, minute=0, second=0, microsecond=0)
-            nick = corr.recipient.nick
-            if ws not in grouped:
-                grouped[ws] = {}
-            grouped[ws][nick] = grouped[ws].get(nick, 0) + float(corr.amount)
+            grouped.setdefault(ws, {})[canonical] = grouped.get(ws, {}).get(canonical, 0) + float(corr.amount)
         return grouped
     finally:
         session.close()
@@ -405,8 +417,13 @@ def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
         payments = session.query(Payment).filter(
             func.lower(Payment.nick) == nick.lower()
         ).order_by(Payment.date.desc()).all()
-        corrections = session.query(ManualCorrection).filter_by(
-            recipient_id=member.id
+        # Cross-guild: find corrections for any member with this nick
+        all_members_with_nick = session.query(GuildMember).filter(
+            func.lower(GuildMember.nick) == nick.lower()
+        ).all()
+        member_ids = [m.id for m in all_members_with_nick]
+        corrections = session.query(ManualCorrection).filter(
+            ManualCorrection.recipient_id.in_(member_ids)
         ).order_by(ManualCorrection.date.desc()).all()
         return {
             'nick': member.nick,
@@ -474,8 +491,18 @@ def get_corrections_with_comments(week_start: datetime, guild_id: int = None) ->
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        results = session.query(ManualCorrection).join(GuildMember).filter(
+        members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None),
+        ).all()
+        nicks = [m.nick for m in members]
+        if not nicks:
+            return {}
+        lower_nicks = [n.lower() for n in nicks]
+
+        results = session.query(ManualCorrection).join(GuildMember).filter(
+            func.lower(GuildMember.nick).in_(lower_nicks),
             ManualCorrection.week_start == week_start,
             ManualCorrection.comment.isnot(None)
         ).all()

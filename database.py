@@ -175,10 +175,10 @@ def init_db():
             """UPDATE payments p SET nick = gm.nick
                FROM guild_members gm
                WHERE gm.id = p.member_id AND p.nick IS NULL""",
-            # Remove old duplicate payments: same nick+date+amount+source (keep lowest id)
+            # Remove old duplicate payments: same nick+date+amount is always one physical payment
             """DELETE FROM payments WHERE id NOT IN (
                SELECT MIN(id) FROM payments
-               GROUP BY nick, date, amount, COALESCE(source_guild_name, ''))""",
+               GROUP BY nick, date, amount)""",
         ]
         for sql in migrations:
             try:

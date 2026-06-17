@@ -230,9 +230,10 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
         try:
             session = get_session()
 
-            # Dedup by (nick, date, amount, source_guild_name) — one row per real payment
+            # Dedup by (nick, date, amount) — same timestamp+amount = same physical payment
+            # regardless of which guild's log the scraper read it from
             exists = session.query(Payment).filter_by(
-                nick=nick, date=date, amount=amount, source_guild_name=src
+                nick=nick, date=date, amount=amount
             ).first()
             if exists:
                 session.close()

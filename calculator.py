@@ -54,7 +54,16 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
         if info and info.get('join_date'):
             jd = info['join_date']
             jw = (jd - timedelta(days=jd.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-            return max(jw, START_DATE)  # never accumulate debt before tracking started
+            if jw >= START_DATE:
+                return jw
+            # Pre-START_DATE join: only go back if member actually has payments before START_DATE
+            # (prevents debt accumulation for members with old join_dates but no history)
+            has_pre_start = any(
+                nick in week_data
+                for ws, week_data in payments_grouped.items()
+                if ws < START_DATE
+            )
+            return jw if has_pre_start else START_DATE
         return START_DATE
 
     earliest = min((_join_week(n) for n in lista_dc), default=START_DATE)

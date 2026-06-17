@@ -262,17 +262,6 @@ async def setup_gildii_command(
     )
     logger.info(f"⚙️  Setup gildii {nazwa} ({channel_id}) przez {interaction.user.name}")
 
-    import asyncio
-    from scraper import get_discord_members, scrape_hard_logs, save_scrape_to_db, _creds_for_guild
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, get_discord_members, channel_id, role_id)
-    creds = _creds_for_guild(env_klucz or nazwa)
-    records = await loop.run_in_executor(None, scrape_hard_logs, *creds)
-    if records:
-        await loop.run_in_executor(None, save_scrape_to_db, records, channel_id)
-
-    await update_ranking(channel_id)
-
     embed = discord.Embed(title="✅ Gildia skonfigurowana!", color=discord.Color.green(), timestamp=datetime.now())
     embed.add_field(name="🏰 Gildia", value=f"**{nazwa}**", inline=True)
     embed.add_field(name="📢 Kanał", value=f"<#{channel_id}>", inline=True)

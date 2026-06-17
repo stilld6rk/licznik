@@ -89,56 +89,12 @@ class HistoriaModal(discord.ui.Modal, title="Historia wpłat"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        import asyncio
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(
-            None, get_all_logs_for_nick, self.nick.value.strip(), _resolve_game_guild_id(interaction)
-        )
-
-        if not data:
-            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{self.nick.value}**", ephemeral=True)
+        nick = self.nick.value.strip()
+        configs = get_guild_configs_for_server(interaction.guild_id)
+        embed = _build_historia_embed(nick, configs)
+        if embed is None:
+            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
             return
-
-        embed = discord.Embed(
-            title=f"📜 Historia wpłat: {data['discord_nick']}",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
-        )
-
-        if data['corrections']:
-            lines = []
-            for c in data['corrections']:
-                line = f"`{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
-                if c['payer']:
-                    line += f" od {c['payer']}"
-                if c['comment']:
-                    line += f" — *{c['comment']}*"
-                lines.append(line)
-            embed.add_field(
-                name=f"✍️ Wpłaty ręczne ({len(data['corrections'])})",
-                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
-                inline=False
-            )
-        else:
-            embed.add_field(name="✍️ Wpłaty ręczne", value="*Brak*", inline=False)
-
-        if data['payments']:
-            from collections import defaultdict
-            by_week = defaultdict(float)
-            for p in data['payments']:
-                by_week[p['week_start']] += p['amount']
-            lines = [
-                f"`{ws.strftime('%d.%m.%Y')}` **{int(total)}💎**"
-                for ws, total in sorted(by_week.items(), reverse=True)
-            ]
-            embed.add_field(
-                name=f"🎮 Wpłaty z gry ({len(by_week)} tygodni, łącznie {int(sum(by_week.values()))}💎)",
-                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
-                inline=False
-            )
-        else:
-            embed.add_field(name="🎮 Wpłaty z gry", value="*Brak*", inline=False)
-
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -629,25 +585,25 @@ async def ranking_ogolny_command(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
 
 
-@bot.tree.command(name="historia", description="Pokaż historię wpłat dla gracza")
-@app_commands.describe(nick="Nick gracza (z gry lub Discord)")
-async def historia_command(interaction: discord.Interaction, nick: str):
-    try:
-        if not is_member(interaction):
-            await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
+def _build_historia_embed(nick: str, configs: list) -> discord.Embed | None:
+    """Build a multi-guild historia embed. Returns None if nick not found anywhere."""
+    from collections import defaultdict
+    found_any = False
+    display_nick = nick
 
-        data = get_all_logs_for_nick(nick.strip(), guild_id=_resolve_game_guild_id(interaction))
+    embed = discord.Embed(
+        title=f"📜 Historia wpłat: {nick}",
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
+    )
+
+    for cfg in configs:
+        data = get_all_logs_for_nick(nick, guild_id=cfg.ranking_channel_id)
         if not data:
-            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"📜 Historia wpłat: {data['discord_nick']}",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
-        )
+            continue
+        found_any = True
+        display_nick = data['discord_nick']
+        guild_label = cfg.guild_name
 
         if data['corrections']:
             lines = []
@@ -659,15 +615,12 @@ async def historia_command(interaction: discord.Interaction, nick: str):
                     line += f" — *{c['comment']}*"
                 lines.append(line)
             embed.add_field(
-                name=f"✍️ Wpłaty ręczne ({len(data['corrections'])})",
-                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                name=f"[{guild_label}] ✍️ Wpłaty ręczne ({len(data['corrections'])})",
+                value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
                 inline=False
             )
-        else:
-            embed.add_field(name="✍️ Wpłaty ręczne", value="*Brak*", inline=False)
 
         if data['payments']:
-            from collections import defaultdict
             by_week = defaultdict(float)
             for p in data['payments']:
                 by_week[p['week_start']] += p['amount']
@@ -676,21 +629,89 @@ async def historia_command(interaction: discord.Interaction, nick: str):
                 for ws, total in sorted(by_week.items(), reverse=True)
             ]
             embed.add_field(
-                name=f"🎮 Wpłaty z gry ({len(by_week)} tygodni, łącznie {int(sum(by_week.values()))}💎)",
-                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
+                name=f"[{guild_label}] 🎮 Wpłaty z gry ({len(by_week)} tyg., łącznie {int(sum(by_week.values()))}💎)",
+                value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
                 inline=False
             )
-        else:
-            embed.add_field(name="🎮 Wpłaty z gry", value="*Brak*", inline=False)
 
+    if not found_any:
+        return None
+    embed.title = f"📜 Historia wpłat: {display_nick}"
+    return embed
+
+
+@bot.tree.command(name="historia", description="Pokaż historię wpłat dla gracza (wszystkie gildie)")
+@app_commands.describe(nick="Nick gracza (z gry lub Discord)")
+async def historia_command(interaction: discord.Interaction, nick: str):
+    try:
+        if not is_member(interaction):
+            await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        configs = get_guild_configs_for_server(interaction.guild_id)
+        embed = _build_historia_embed(nick.strip(), configs)
+        if embed is None:
+            await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
+            return
         await interaction.followup.send(embed=embed, ephemeral=True)
-
     except Exception as e:
         logger.error(f"❌ Błąd historia: {e}")
         try:
             await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
         except Exception:
             pass
+
+
+@bot.tree.command(name="pomoc", description="Lista wszystkich komend bota z opisami")
+async def pomoc_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 Pomoc — LicznikGEM",
+        description="Lista dostępnych komend bota:",
+        color=discord.Color.gold(),
+        timestamp=datetime.now()
+    )
+
+    embed.add_field(
+        name="👤 Dla każdego",
+        value=(
+            "`/historia <nick>` — Historia wpłat gracza ze wszystkich gildii\n"
+            "`/ranking_ogolny` — Łączny ranking wpłat od początku (tylko dla Ciebie)\n"
+            "`/members` — Lista aktywnych członków tej gildii\n"
+            "`/zaległości [member]` — Ręczne wpłaty w bieżącym tygodniu\n"
+            "`/pomoc` — Ta lista komend"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔑 Dla adminów gildii",
+        value=(
+            "`/wpłata_ręczna <odbiorca> <kwota> [powód] [kto]` — Dodaj ręczną wpłatę/odliczenie\n"
+            "`/lista_wpłat <nick>` — Pokaż ręczne wpłaty gracza z ID\n"
+            "`/usuń_wpłatę <ID>` — Usuń wpłatę ręczną po ID\n"
+            "`/edytuj_wpłatę <ID> [kwota] [komentarz]` — Edytuj wpłatę ręczną\n"
+            "`/ustaw_dołączenie <nick> <data>` — Ustaw datę dołączenia (DD.MM.YYYY)\n"
+            "`/tydzień_off <true/false>` — Wyłącz/włącz bieżący tydzień\n"
+            "`/zmień_nick <stary> <nowy>` — Zmień/popraw nick gracza w bazie\n"
+            "`/usun_gracza <nick>` — Usuń gracza z rankingu (historia zachowana)\n"
+            "`/aktualizuj [gildia]` — Ręcznie odśwież ranking\n"
+            "`/sync_scrape` — Uruchom scraper ręcznie"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛡️ Dla administratorów serwera",
+        value=(
+            "`/setup_gildii <nazwa> <kanal_id> <rola_id> ...` — Skonfiguruj gildię\n"
+            "`/lista_gildii` — Pokaż wszystkie aktywne konfiguracje gildii\n"
+            "`/deaktywuj_gildie <kanal_id>` — Deaktywuj konfigurację gildii"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="💎 Ranking aktualizowany automatycznie co 24 godziny")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="members", description="Lista wszystkich członków")

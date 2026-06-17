@@ -526,13 +526,24 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
             None, _resolve_discord_guild_id, cfg.ranking_channel_id, cfg.discord_guild_id
         )
         await loop.run_in_executor(None, get_discord_members, discord_guild_id, cfg.role_id, cfg.ranking_channel_id)
-        await update_ranking(cfg.ranking_channel_id)
 
-        embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
-        embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
-        embed.add_field(name="📢 Kanał", value=f"<#{cfg.ranking_channel_id}>", inline=True)
-        embed.set_footer(text=f"Przez: {interaction.user.name}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        if gildia:
+            # Specific guild requested — update just that one
+            await update_ranking(cfg.ranking_channel_id)
+            embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
+            embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
+            embed.add_field(name="📢 Kanał", value=f"<#{cfg.ranking_channel_id}>", inline=True)
+            embed.set_footer(text=f"Przez: {interaction.user.name}")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            # No guild specified — update all guilds on this server
+            await update_all_rankings()
+            configs = get_guild_configs_for_server(interaction.guild_id)
+            names = ", ".join(f"**{c.guild_name}**" for c in configs) if configs else "wszystkie"
+            embed = discord.Embed(title="✅ Wszystkie rankingi zaktualizowane", color=discord.Color.green(), timestamp=datetime.now())
+            embed.add_field(name="🏰 Gildie", value=names, inline=False)
+            embed.set_footer(text=f"Przez: {interaction.user.name}")
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
         logger.error(f"❌ Błąd aktualizuj: {e}")
@@ -642,57 +653,61 @@ async def ranking_ogolny_command(interaction: discord.Interaction):
 
 
 def _build_historia_embed(nick: str, configs: list) -> discord.Embed | None:
-    """Build a multi-guild historia embed. Returns None if nick not found anywhere."""
+    """Build historia embed. Finds nick in any guild config, then shows all cross-guild payments."""
     from collections import defaultdict
-    found_any = False
-    display_nick = nick
+
+    # Find the member record in any of the server's guilds
+    data = None
+    for cfg in configs:
+        data = get_all_logs_for_nick(nick, guild_id=cfg.ranking_channel_id)
+        if data:
+            break
+    if not data:
+        return None
 
     embed = discord.Embed(
-        title=f"📜 Historia wpłat: {nick}",
+        title=f"📜 Historia wpłat: {data['discord_nick']}",
         color=discord.Color.blue(),
         timestamp=datetime.now()
     )
 
-    for cfg in configs:
-        data = get_all_logs_for_nick(nick, guild_id=cfg.ranking_channel_id)
-        if not data:
-            continue
-        found_any = True
-        display_nick = data['discord_nick']
-        guild_label = cfg.guild_name
+    # Manual corrections (guild-scoped — shown as-is)
+    if data['corrections']:
+        lines = []
+        for c in data['corrections']:
+            line = f"`{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
+            if c['payer']:
+                line += f" od {c['payer']}"
+            if c['comment']:
+                line += f" — *{c['comment']}*"
+            lines.append(line)
+        embed.add_field(
+            name=f"✍️ Wpłaty ręczne ({len(data['corrections'])})",
+            value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
+            inline=False
+        )
 
-        if data['corrections']:
-            lines = []
-            for c in data['corrections']:
-                line = f"`{c['week_start'].strftime('%d.%m')}` **{int(c['amount']):+}💎**"
-                if c['payer']:
-                    line += f" od {c['payer']}"
-                if c['comment']:
-                    line += f" — *{c['comment']}*"
-                lines.append(line)
-            embed.add_field(
-                name=f"[{guild_label}] ✍️ Wpłaty ręczne ({len(data['corrections'])})",
-                value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
-                inline=False
-            )
+    # Game payments grouped by source guild, then by week
+    if data['payments']:
+        by_source = defaultdict(lambda: defaultdict(float))
+        for p in data['payments']:
+            src = p['source_guild'] or '?'
+            by_source[src][p['week_start']] += p['amount']
 
-        if data['payments']:
-            by_week = defaultdict(float)
-            for p in data['payments']:
-                by_week[p['week_start']] += p['amount']
+        for src, by_week in sorted(by_source.items()):
+            total = int(sum(by_week.values()))
             lines = [
-                f"`{ws.strftime('%d.%m.%Y')}` **{int(total)}💎**"
-                for ws, total in sorted(by_week.items(), reverse=True)
+                f"`{ws.strftime('%d.%m.%Y')}` **{int(v)}💎**"
+                for ws, v in sorted(by_week.items(), reverse=True)
             ]
             embed.add_field(
-                name=f"[{guild_label}] 🎮 Wpłaty z gry ({len(by_week)} tyg., łącznie {int(sum(by_week.values()))}💎)",
+                name=f"🎮 [{src}] {len(by_week)} tyg., łącznie {total}💎",
                 value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
                 inline=False
             )
+    else:
+        embed.add_field(name="🎮 Wpłaty z gry", value="*Brak*", inline=False)
 
-    if not found_any:
-        return None
-    embed.title = f"📜 Historia wpłat: {display_nick}"
     return embed
 
 

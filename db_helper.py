@@ -241,12 +241,16 @@ def get_member_info(nick: str, guild_id: int = None):
 
 # ── Payments ───────────────────────────────────────────────────────────────────
 
-def add_payment(nick: str, amount: float, date: datetime, item_name: str = None, guild_id: int = None):
+def add_payment(nick: str, amount: float, date: datetime, item_name: str = None,
+                guild_id: int = None, source_guild_name: str = None):
     session = get_session()
     try:
         member = get_or_create_member(nick, guild_id=guild_id)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        payment = Payment(member_id=member.id, amount=amount, date=date, item_name=item_name, week_start=week_start)
+        payment = Payment(
+            member_id=member.id, nick=nick, source_guild_name=source_guild_name,
+            amount=amount, date=date, item_name=item_name, week_start=week_start,
+        )
         session.add(payment)
         session.commit()
     finally:
@@ -333,16 +337,29 @@ def delete_correction(correction_id: int, guild_id: int = None):
 
 
 def get_all_payments_grouped(guild_id: int = None) -> dict:
+    """Return payments grouped by (week_start, nick) for members of guild_id,
+    summing payments from ALL source guilds (cross-guild totals)."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
+        # Get nicks of active members in this guild
+        members = session.query(GuildMember).filter(
+            GuildMember.guild_id == gid,
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None),
+        ).all()
+        nicks = [m.nick for m in members]
+        if not nicks:
+            return {}
+
+        # Sum ALL payments for these nicks regardless of which guild logged them
         results = session.query(
             Payment.week_start,
-            GuildMember.nick,
+            Payment.nick,
             func.sum(Payment.amount).label('total')
-        ).join(GuildMember).filter(
-            GuildMember.guild_id == gid
-        ).group_by(Payment.week_start, GuildMember.nick).all()
+        ).filter(
+            Payment.nick.in_(nicks)
+        ).group_by(Payment.week_start, Payment.nick).all()
 
         grouped = {}
         for week_start, nick, total in results:
@@ -373,19 +390,34 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
 
 
 def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
+    """Return all logs for a nick. Payments are cross-guild (tagged by source_guild_name).
+    Corrections are scoped to guild_id (they are guild-specific manual entries)."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
         member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
             return None
-        payments = session.query(Payment).filter_by(member_id=member.id).order_by(Payment.date.desc()).all()
-        corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
+        # All payments for this nick across all source guilds
+        payments = session.query(Payment).filter(
+            Payment.nick == nick
+        ).order_by(Payment.date.desc()).all()
+        corrections = session.query(ManualCorrection).filter_by(
+            recipient_id=member.id
+        ).order_by(ManualCorrection.date.desc()).all()
         return {
             'nick': member.nick,
             'discord_nick': member.discord_nick or member.nick,
-            'payments': [{'date': p.date, 'amount': p.amount, 'item': p.item_name, 'week_start': p.week_start} for p in payments],
-            'corrections': [{'date': c.date, 'amount': c.amount, 'payer': c.payer, 'comment': c.comment, 'week_start': c.week_start} for c in corrections],
+            'payments': [
+                {'date': p.date, 'amount': p.amount, 'item': p.item_name,
+                 'week_start': p.week_start, 'source_guild': p.source_guild_name}
+                for p in payments
+            ],
+            'corrections': [
+                {'date': c.date, 'amount': c.amount, 'payer': c.payer,
+                 'comment': c.comment, 'week_start': c.week_start}
+                for c in corrections
+            ],
         }
     finally:
         session.close()

@@ -206,54 +206,66 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             return []
 
 
-def save_scrape_to_db(records: list, guild_id: int = None):
-    """Zapisz dane scrapowania do bazy dla danego guildu (pomija duplikaty)"""
+def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = None):
+    """Zapisz dane scrapowania.
+    Deduplication is by (nick, date, amount, source_guild_name) — cross-guild.
+    A payment is saved once regardless of how many guild counters share the same credentials."""
     from database import get_session, Payment, GuildMember
     gid = guild_id or GUILD_ID
+    src = guild_name or str(gid)
     saved = 0
     skipped_dup = 0
     skipped_no_member = 0
     no_member_nicks = set()
 
-    logger.info(f"[Guild {gid}] 📥 Otrzymano {len(records)} wpisów do zapisania")
-    for r in records[:10]:
+    logger.info(f"[{src}] 📥 Otrzymano {len(records)} wpisów do zapisania")
+    for r in records[:5]:
         logger.info(f"  📝 przykład: nick={r.get('Nazwa członka')!r}, ilość={r.get('Ilość')}, "
                     f"przedmiot={r.get('Przedmiot')!r}, data={r.get('Data')}")
 
     for record in records:
+        nick = record['Nazwa członka']
+        amount = int(record['Ilość'])
+        date = record['Data']
         try:
             session = get_session()
-            member = session.query(GuildMember).filter_by(guild_id=gid, nick=record['Nazwa członka']).first()
-            if not member:
-                session.close()
-                skipped_no_member += 1
-                no_member_nicks.add(record['Nazwa członka'])
-                continue
+
+            # Dedup by (nick, date, amount, source_guild_name) — one row per real payment
             exists = session.query(Payment).filter_by(
-                member_id=member.id,
-                date=record['Data'],
-                amount=int(record['Ilość'])
+                nick=nick, date=date, amount=amount, source_guild_name=src
             ).first()
-            session.close()
-            if not exists:
-                add_payment(
-                    nick=record['Nazwa członka'],
-                    amount=int(record['Ilość']),
-                    date=record['Data'],
-                    item_name=record['Przedmiot'],
-                    guild_id=gid,
-                )
-                saved += 1
-                logger.info(f"  💾 zapisano: {record['Nazwa członka']} +{int(record['Ilość'])}💎 "
-                            f"({record['Przedmiot']}) {record['Data']}")
-            else:
+            if exists:
+                session.close()
                 skipped_dup += 1
+                continue
+
+            # Find member in current guild; fall back to any guild so payment is still recorded
+            member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
+            if not member:
+                member = session.query(GuildMember).filter_by(nick=nick).first()
+            session.close()
+
+            if not member:
+                skipped_no_member += 1
+                no_member_nicks.add(nick)
+                continue
+
+            add_payment(
+                nick=nick,
+                amount=amount,
+                date=date,
+                item_name=record['Przedmiot'],
+                guild_id=member.guild_id,
+                source_guild_name=src,
+            )
+            saved += 1
+            logger.info(f"  💾 zapisano: {nick} +{amount}💎 ({record['Przedmiot']}) {date} [{src}]")
         except Exception as e:
-            logger.error(f"❌ Błąd przy zapisie wpłaty {record.get('Nazwa członka')}: {e}")
+            logger.error(f"❌ Błąd przy zapisie wpłaty {nick}: {e}")
 
     if no_member_nicks:
-        logger.warning(f"[Guild {gid}] ⚠️  Nicki bez rekordu członka w tej gildii (pominięto {skipped_no_member} wpisów): {sorted(no_member_nicks)}")
-    logger.info(f"[Guild {gid}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped_dup} duplikatów, {skipped_no_member} bez członka")
+        logger.warning(f"[{src}] ⚠️  Brak rekordu członka (pominięto {skipped_no_member}): {sorted(no_member_nicks)}")
+    logger.info(f"[{src}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped_dup} duplikatów, {skipped_no_member} bez członka")
 
 
 def run_scraper():
@@ -267,7 +279,7 @@ def run_scraper():
         get_discord_members(GUILD_ID, ROLE_ID)
         records = scrape_hard_logs()
         if records:
-            save_scrape_to_db(records, GUILD_ID)
+            save_scrape_to_db(records, GUILD_ID, guild_name="default")
         logger.info("✅ Scraper ukończony (tryb legacy)")
         return
 
@@ -292,7 +304,7 @@ def run_scraper():
         records = seen_creds[creds]
         if records:
             logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
-            save_scrape_to_db(records, game_guild_id)
+            save_scrape_to_db(records, game_guild_id, guild_name=cfg.guild_name)
 
     logger.info("✅ Scraper ukończony")
 

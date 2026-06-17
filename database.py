@@ -33,7 +33,11 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True)
-    member_id = Column(Integer, ForeignKey("guild_members.id"), nullable=False)
+    member_id = Column(Integer, ForeignKey("guild_members.id"), nullable=True)
+    # Denormalized nick for cross-guild lookup without joins
+    nick = Column(String(100), nullable=True)
+    # Which game guild's treasury log this payment came from
+    source_guild_name = Column(String(100), nullable=True)
     amount = Column(Float, nullable=False)
     date = Column(DateTime, nullable=False)
     item_name = Column(String(255), nullable=True)
@@ -164,6 +168,17 @@ def init_db():
                    WHERE is_active = true
                    GROUP BY discord_guild_id, guild_name
                )""",
+            # Cross-guild payments: add nick + source_guild_name columns
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS nick VARCHAR(100)",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS source_guild_name VARCHAR(100)",
+            # Backfill nick from guild_members
+            """UPDATE payments p SET nick = gm.nick
+               FROM guild_members gm
+               WHERE gm.id = p.member_id AND p.nick IS NULL""",
+            # Remove old duplicate payments: same nick+date+amount+source (keep lowest id)
+            """DELETE FROM payments WHERE id NOT IN (
+               SELECT MIN(id) FROM payments
+               GROUP BY nick, date, amount, COALESCE(source_guild_name, ''))""",
         ]
         for sql in migrations:
             try:

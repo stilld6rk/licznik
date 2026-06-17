@@ -511,13 +511,13 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
             cfg = _get_cfg(interaction)
 
         loop = asyncio.get_event_loop()
-        discord_guild_id = await loop.run_in_executor(
-            None, _resolve_discord_guild_id, cfg.ranking_channel_id, cfg.discord_guild_id
-        )
-        await loop.run_in_executor(None, get_discord_members, discord_guild_id, cfg.role_id, cfg.ranking_channel_id)
 
         if gildia:
-            # Specific guild requested — update just that one
+            # Specific guild: refresh members for that guild only, then update its ranking
+            discord_guild_id = await loop.run_in_executor(
+                None, _resolve_discord_guild_id, cfg.ranking_channel_id, cfg.discord_guild_id
+            )
+            await loop.run_in_executor(None, get_discord_members, discord_guild_id, cfg.role_id, cfg.ranking_channel_id)
             await update_ranking(cfg.ranking_channel_id)
             embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
             embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
@@ -525,10 +525,16 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
             embed.set_footer(text=f"Przez: {interaction.user.name}")
             await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            # No guild specified — update all guilds on this server
+            # No guild specified — refresh members for ALL guilds first, then update all rankings
+            all_cfgs = get_guild_configs_for_server(interaction.guild_id)
+            for c in all_cfgs:
+                dgid = await loop.run_in_executor(
+                    None, _resolve_discord_guild_id, c.ranking_channel_id, c.discord_guild_id
+                )
+                if dgid:
+                    await loop.run_in_executor(None, get_discord_members, dgid, c.role_id, c.ranking_channel_id)
             await update_all_rankings()
-            configs = get_guild_configs_for_server(interaction.guild_id)
-            names = ", ".join(f"**{c.guild_name}**" for c in configs) if configs else "wszystkie"
+            names = ", ".join(f"**{c.guild_name}**" for c in all_cfgs) if all_cfgs else "wszystkie"
             embed = discord.Embed(title="✅ Wszystkie rankingi zaktualizowane", color=discord.Color.green(), timestamp=datetime.now())
             embed.add_field(name="🏰 Gildie", value=names, inline=False)
             embed.set_footer(text=f"Przez: {interaction.user.name}")

@@ -1,4 +1,4 @@
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig
 from config import GUILD_ID, RANKING_CHANNEL_ID
 from datetime import datetime, timedelta
@@ -337,12 +337,11 @@ def delete_correction(correction_id: int, guild_id: int = None):
 
 
 def get_all_payments_grouped(guild_id: int = None) -> dict:
-    """Return payments grouped by (week_start, nick) for members of guild_id,
-    summing payments from ALL source guilds (cross-guild totals)."""
+    """Return payments grouped by (week_start, nick) for members of guild_id.
+    Payments looked up by nick only — all source guilds included."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        # Get nicks of active members in this guild
         members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
             GuildMember.is_active == True,
@@ -352,41 +351,22 @@ def get_all_payments_grouped(guild_id: int = None) -> dict:
         if not nicks:
             return {}
 
-        # Get ALL member IDs for these nicks across every guild
-        # (old payments have nick=NULL but member_id pointing to any guild's record)
-        lower_nicks_set = [n.lower() for n in nicks]
-        all_members_for_nicks = session.query(GuildMember).filter(
-            func.lower(GuildMember.nick).in_(lower_nicks_set)
-        ).all()
-        member_ids = [m.id for m in all_members_for_nicks]
-        # Map every member_id back to the canonical nick for this guild
-        id_to_nick = {m.id: next((n for n in nicks if n.lower() == m.nick.lower()), m.nick)
-                      for m in all_members_for_nicks}
-
-        # Sum ALL payments for these nicks regardless of which guild logged them.
-        # Match by nick (case-insensitive) OR member_id to cover old rows with nick=NULL.
         lower_nicks = [n.lower() for n in nicks]
+        nick_map = {n.lower(): n for n in nicks}
+
         results = session.query(
             Payment.week_start,
             Payment.nick,
-            Payment.member_id,
             func.sum(Payment.amount).label('total')
         ).filter(
-            or_(
-                func.lower(Payment.nick).in_(lower_nicks),
-                Payment.member_id.in_(member_ids),
-            )
-        ).group_by(Payment.week_start, Payment.nick, Payment.member_id).all()
-
-
+            func.lower(Payment.nick).in_(lower_nicks)
+        ).group_by(Payment.week_start, Payment.nick).all()
 
         grouped = {}
-        for week_start, p_nick, member_id, total in results:
-            resolved_nick = p_nick or id_to_nick.get(member_id)
-            if not resolved_nick:
+        for week_start, p_nick, total in results:
+            canonical = nick_map.get((p_nick or '').lower())
+            if not canonical:
                 continue
-            # Normalise to the canonical nick stored in guild_members
-            canonical = next((n for n in nicks if n.lower() == resolved_nick.lower()), resolved_nick)
             ws = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
             grouped.setdefault(ws, {})[canonical] = grouped.get(ws, {}).get(canonical, 0) + float(total or 0)
         return grouped
@@ -422,15 +402,8 @@ def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
         member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
         if not member:
             return None
-        # Collect ALL member IDs for this nick across every guild (old rows may have nick=NULL
-        # but member_id pointing to a different guild's record)
-        all_member_ids = [
-            m.id for m in session.query(GuildMember.id).filter(
-                func.lower(GuildMember.nick) == nick.lower()
-            ).all()
-        ]
         payments = session.query(Payment).filter(
-            or_(func.lower(Payment.nick) == nick.lower(), Payment.member_id.in_(all_member_ids))
+            func.lower(Payment.nick) == nick.lower()
         ).order_by(Payment.date.desc()).all()
         corrections = session.query(ManualCorrection).filter_by(
             recipient_id=member.id

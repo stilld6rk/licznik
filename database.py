@@ -171,14 +171,26 @@ def init_db():
             # Cross-guild payments: add nick + source_guild_name columns
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS nick VARCHAR(100)",
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS source_guild_name VARCHAR(100)",
-            # Backfill nick from guild_members
+            # Backfill nick from guild_members via member_id FK
             """UPDATE payments p SET nick = gm.nick
                FROM guild_members gm
                WHERE gm.id = p.member_id AND p.nick IS NULL""",
-            # Remove old duplicate payments: same nick+date+amount is always one physical payment
+            # Fix source_guild_name that was incorrectly stored as a channel ID (numeric string)
+            # by looking up the guild_name from guild_configs
+            """UPDATE payments p SET source_guild_name = gc.guild_name
+               FROM guild_members gm
+               JOIN guild_configs gc ON gc.ranking_channel_id = gm.guild_id
+               WHERE gm.id = p.member_id
+                 AND (p.source_guild_name IS NULL OR p.source_guild_name ~ '^[0-9]+$')""",
+            # Remove duplicate payments: same nick+date+amount = same physical payment
             """DELETE FROM payments WHERE id NOT IN (
                SELECT MIN(id) FROM payments
-               GROUP BY nick, date, amount)""",
+               WHERE nick IS NOT NULL
+               GROUP BY LOWER(nick), date, amount)
+               AND nick IS NOT NULL""",
+            # Delete any remaining orphaned payments with no nick and no valid member
+            """DELETE FROM payments WHERE nick IS NULL
+               AND (member_id IS NULL OR member_id NOT IN (SELECT id FROM guild_members))""",
         ]
         for sql in migrations:
             try:

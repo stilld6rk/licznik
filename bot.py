@@ -508,7 +508,12 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
         await interaction.response.defer(ephemeral=True)
 
         import asyncio
-        from scraper import get_discord_members, _resolve_discord_guild_id
+        from scraper import get_discord_members, _resolve_discord_guild_id, run_scraper
+
+        loop = asyncio.get_event_loop()
+
+        # Always run full scraper first (fetches members + new payments for all guilds)
+        await loop.run_in_executor(None, run_scraper)
 
         if gildia:
             configs = get_guild_configs_for_server(interaction.guild_id)
@@ -517,33 +522,15 @@ async def aktualizuj_command(interaction: discord.Interaction, gildia: str = Non
                 names = ", ".join(c.guild_name for c in configs)
                 await interaction.followup.send(f"❌ Nie znaleziono gildii: **{gildia}**\nDostępne: {names}", ephemeral=True)
                 return
-            cfg = match
-        else:
-            cfg = _get_cfg(interaction)
-
-        loop = asyncio.get_event_loop()
-
-        if gildia:
-            # Specific guild: refresh members for that guild only, then update its ranking
-            discord_guild_id = await loop.run_in_executor(
-                None, _resolve_discord_guild_id, cfg.ranking_channel_id, cfg.discord_guild_id
-            )
-            await loop.run_in_executor(None, get_discord_members, discord_guild_id, cfg.role_id, cfg.ranking_channel_id)
-            await update_ranking(cfg.ranking_channel_id)
+            await update_ranking(match.ranking_channel_id)
             embed = discord.Embed(title="✅ Ranking zaktualizowany", color=discord.Color.green(), timestamp=datetime.now())
-            embed.add_field(name="🏰 Gildia", value=f"**{cfg.guild_name}**", inline=True)
-            embed.add_field(name="📢 Kanał", value=f"<#{cfg.ranking_channel_id}>", inline=True)
+            embed.add_field(name="🏰 Gildia", value=f"**{match.guild_name}**", inline=True)
+            embed.add_field(name="📢 Kanał", value=f"<#{match.ranking_channel_id}>", inline=True)
             embed.set_footer(text=f"Przez: {interaction.user.name}")
             await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            # No guild specified — refresh members for ALL guilds first, then update all rankings
+            # No guild specified — update all rankings (scraper already refreshed members)
             all_cfgs = get_guild_configs_for_server(interaction.guild_id)
-            for c in all_cfgs:
-                dgid = await loop.run_in_executor(
-                    None, _resolve_discord_guild_id, c.ranking_channel_id, c.discord_guild_id
-                )
-                if dgid:
-                    await loop.run_in_executor(None, get_discord_members, dgid, c.role_id, c.ranking_channel_id)
             await update_all_rankings()
             names = ", ".join(f"**{c.guild_name}**" for c in all_cfgs) if all_cfgs else "wszystkie"
             embed = discord.Embed(title="✅ Wszystkie rankingi zaktualizowane", color=discord.Color.green(), timestamp=datetime.now())

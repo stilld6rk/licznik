@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+_WARSAW = ZoneInfo('Europe/Warsaw')
 from config import LIMIT, GUILD_NAME, GUILD_ID
 from db_helper import (
     get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
@@ -13,8 +16,8 @@ START_DATE = datetime(2026, 6, 1)  # poniedziałek pierwszego tygodnia
 
 
 def get_current_week_start() -> datetime:
-    now = datetime.now()
-    return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now(_WARSAW)
+    return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
 
 def get_weeks_since(start: datetime) -> list:
@@ -159,7 +162,7 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
 
         lines.append(f"{ikona} {display}: {efektywna}💎 {detail}")
 
-    footer = f"\n🕐 Ostatnia aktualizacja: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    footer = f"\n🕐 Ostatnia aktualizacja: {datetime.now(_WARSAW).strftime('%d.%m.%Y %H:%M')}"
     content = "\n".join(lines)
     max_len = 2000 - len(footer)
     if len(content) > max_len:
@@ -198,7 +201,7 @@ def build_overall_ranking_content(guild_id: int = None, guild_name: str = None) 
         ikona = medals[idx] if idx < 3 else "🔹"
         lines.append(f"{ikona} {display}: {int(total)}💎")
 
-    footer = f"\n🕐 Stan na: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    footer = f"\n🕐 Stan na: {datetime.now(_WARSAW).strftime('%d.%m.%Y %H:%M')}"
     content = "\n".join(lines)
     max_len = 2000 - len(footer)
     if len(content) > max_len:

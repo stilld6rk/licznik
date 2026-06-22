@@ -680,22 +680,23 @@ def _build_historia_embed(nick: str, configs: list) -> discord.Embed | None:
             inline=False
         )
 
-    # Game payments grouped by source guild, then by week
+    # Game payments grouped by source guild, individual entries sorted by date
     if data['payments']:
-        by_source = defaultdict(lambda: defaultdict(float))
+        by_source = defaultdict(list)
         for p in data['payments']:
             src = p['source_guild'] or '?'
-            by_source[src][p['week_start']] += p['amount']
+            by_source[src].append(p)
 
-        for src, by_week in sorted(by_source.items()):
-            total = int(sum(by_week.values()))
+        for src, entries in sorted(by_source.items()):
+            entries_sorted = sorted(entries, key=lambda p: p['date'], reverse=True)
+            total = int(sum(p['amount'] for p in entries_sorted))
             lines = [
-                f"`{ws.strftime('%d.%m.%Y')}` **{int(v)}💎**"
-                for ws, v in sorted(by_week.items(), reverse=True)
+                f"`{p['date'].strftime('%d.%m.%Y %H:%M')}` **{int(p['amount'])}💎**"
+                for p in entries_sorted
             ]
             embed.add_field(
-                name=f"🎮 [{src}] {len(by_week)} tyg., łącznie {total}💎",
-                value="\n".join(lines[:15]) + ("…" if len(lines) > 15 else ""),
+                name=f"🎮 [{src}] {len(entries_sorted)} wpłat, łącznie {total}💎",
+                value="\n".join(lines[:20]) + ("…" if len(lines) > 20 else ""),
                 inline=False
             )
     else:

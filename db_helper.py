@@ -419,9 +419,11 @@ def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
         payments = session.query(Payment).filter(
             func.lower(Payment.nick) == nick.lower()
         ).order_by(Payment.date.desc()).all()
-        # Cross-guild: find corrections for any member with this nick
+        # Cross-guild: find corrections for active role members with this nick (exclude stale/manual records)
         all_members_with_nick = session.query(GuildMember).filter(
-            func.lower(GuildMember.nick) == nick.lower()
+            func.lower(GuildMember.nick) == nick.lower(),
+            GuildMember.is_active == True,
+            GuildMember.added_manually == False,
         ).all()
         member_ids = [m.id for m in all_members_with_nick]
         corrections = session.query(ManualCorrection).filter(

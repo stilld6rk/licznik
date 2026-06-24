@@ -182,11 +182,11 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
 
             df = pd.concat(all_frames, ignore_index=True)
             logger.info(f"📋 Kolumny tabeli: {list(df.columns)}")
-            # Keep only deposit rows — scan every string column for 'wypłac' keyword
+            # Keep only deposit rows — withdrawals contain ASCII words 'pobranie' or 'zabranie'
             before = len(df)
             str_cols = [c for c in df.columns if df[c].dtype == object]
             withdrawal_mask = df[str_cols].apply(
-                lambda col: col.str.contains('wypłac', case=False, na=False)
+                lambda col: col.str.contains('pobranie|zabranie', case=False, na=False, regex=True)
             ).any(axis=1)
             df = df[~withdrawal_mask].copy()
             logger.info(f"🔽 Odfiltrowano wypłaty: {before} → {len(df)} wpisów")

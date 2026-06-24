@@ -181,6 +181,15 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             browser.close()
 
             df = pd.concat(all_frames, ignore_index=True)
+            logger.info(f"📋 Kolumny tabeli: {list(df.columns)}")
+            # Keep only deposit rows — withdrawals contain 'wypłac' in the action column
+            action_col = next(
+                (c for c in df.columns if any(k in str(c).lower() for k in ('typ', 'dział', 'akcja'))),
+                df.columns[0]  # fallback: first column is the action type
+            )
+            before = len(df)
+            df = df[~df[action_col].str.contains('wypłac', case=False, na=False)].copy()
+            logger.info(f"🔽 Odfiltrowano wypłaty: {before} → {len(df)} wpisów (kolumna: '{action_col}')")
             df = df[~df['Nazwa członka'].str.contains('->', na=False)].copy()
             df['Nazwa członka'] = (
                 df['Nazwa członka']

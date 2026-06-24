@@ -182,6 +182,7 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
 
             df = pd.concat(all_frames, ignore_index=True)
             logger.info(f"📋 Kolumny tabeli: {list(df.columns)}")
+            logger.info(f"📋 Przykładowe wiersze:\n{df.head(5).to_string()}")
             # Keep only deposit rows — withdrawals contain ASCII words 'pobranie' or 'zabranie'
             before = len(df)
             str_cols = [c for c in df.columns if df[c].dtype == object]

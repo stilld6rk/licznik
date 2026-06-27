@@ -5,7 +5,7 @@ from datetime import datetime
 from config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, echo=False)
-Session = sessionmaker(bind=engine)
+Session = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
 class GuildMember(Base):

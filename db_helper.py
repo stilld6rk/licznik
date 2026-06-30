@@ -170,10 +170,14 @@ def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None
             member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id, added_manually=added_manually)
             session.add(member)
             session.commit()
-        elif discord_id and not member.discord_id and not added_manually:
+        elif not added_manually and member.added_manually:
             # Real Discord role scrape found this nick — promote from manual placeholder to real member
-            member.discord_id = discord_id
+            if discord_id:
+                member.discord_id = discord_id
             member.added_manually = False
+            session.commit()
+        elif discord_id and not member.discord_id:
+            member.discord_id = discord_id
             session.commit()
         return member
     finally:

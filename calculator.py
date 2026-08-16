@@ -143,7 +143,11 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
         ilosc_raw = int(dane['ilosc_raw'])
         przen_z = int(dane['przeniesienie_z'])
         efektywna = ilosc_raw + przen_z
-        display = member_info_map.get(nick, {}).get('discord_nick', nick)
+        info = member_info_map.get(nick, {})
+        display = info.get('discord_nick', nick)
+        join_date = info.get('join_date')
+        if join_date:
+            display += f" (Dołączył: {join_date.strftime('%d.%m')})"
 
         if przen_z > 0:
             detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"

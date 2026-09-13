@@ -166,6 +166,13 @@ def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
 
 def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None,
                          added_manually: bool = False) -> GuildMember:
+    """`added_manually=False` means this call comes from the Discord role scrape
+    (scraper.get_discord_members) — i.e. this nick genuinely holds the role right
+    now, so it's safe to (re)promote it and refresh its discord_id.
+    `added_manually=True` (e.g. from /wpłata_ręczna) must never touch discord_id
+    on an EXISTING member — doing so previously resurrected members who lost
+    their role (scraper clears their discord_id) back onto the active roster
+    just because someone logged a manual payment for their nick."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
@@ -174,14 +181,11 @@ def get_or_create_member(nick: str, discord_id: int = None, guild_id: int = None
             member = GuildMember(guild_id=gid, nick=nick, discord_id=discord_id, added_manually=added_manually)
             session.add(member)
             session.commit()
-        elif not added_manually and member.added_manually:
-            # Real Discord role scrape found this nick — promote from manual placeholder to real member
-            if discord_id:
+        elif not added_manually:
+            if member.added_manually:
+                member.added_manually = False
+            if discord_id and member.discord_id != discord_id:
                 member.discord_id = discord_id
-            member.added_manually = False
-            session.commit()
-        elif discord_id and not member.discord_id:
-            member.discord_id = discord_id
             session.commit()
         return member
     finally:
@@ -435,9 +439,11 @@ def get_all_logs_for_nick(nick: str) -> dict:
     roster record anywhere and no ledger history at all."""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter(
+        # A nick can have a GuildMember row per guild — prefer one with join_date set
+        members = session.query(GuildMember).filter(
             func.lower(GuildMember.nick) == nick.lower()
-        ).first()
+        ).all()
+        member = next((m for m in members if m.join_date), None) or (members[0] if members else None)
         payments = session.query(Payment).filter(
             func.lower(Payment.nick) == nick.lower()
         ).order_by(Payment.date.desc()).all()
@@ -453,6 +459,7 @@ def get_all_logs_for_nick(nick: str) -> dict:
         return {
             'nick': display_nick,
             'discord_nick': discord_nick,
+            'join_date': member.join_date if member else None,
             'payments': [
                 {'date': p.date, 'amount': p.amount, 'item': p.item_name,
                  'week_start': p.week_start, 'source_guild': p.source_guild_name}

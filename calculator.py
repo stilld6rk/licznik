@@ -157,20 +157,18 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
         efektywna = ilosc_raw + przen_z
         info = member_info_map.get(nick, {})
         display = info.get('discord_nick', nick)
-        join_date = info.get('join_date')
-        if join_date:
-            display += f" (Dołączył: {join_date.strftime('%d.%m')})"
 
         na_urlopie = dane.get('na_urlopie') and ilosc_raw <= 0
 
+        # Tylko dopisujemy szczegóły gdy wnoszą coś ponad samą kwotę
         if przen_z > 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
+            detail = f" (wpłacono {ilosc_raw}💎, nadpłata +{przen_z})"
         elif na_urlopie:
-            detail = "(🏖️ Urlop — brak wymaganej wpłaty)"
+            detail = " (🏖️ urlop — zwolniony z wpłaty)"
         elif przen_z < 0:
-            detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
+            detail = f" (wpłacono {ilosc_raw}💎, zaległość {przen_z})"
         else:
-            detail = f"(wpłacono {ilosc_raw}💎)"
+            detail = ""
 
         if efektywna >= lim:
             ikona = medals[medal_idx] if medal_idx < 3 else "🔹"
@@ -182,7 +180,7 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
         else:
             ikona = "○"
 
-        lines.append(f"{ikona} {display}: {efektywna}💎 {detail}")
+        lines.append(f"{ikona} **{display}**: {efektywna}💎{detail}")
 
     footer = f"\n🕐 Ostatnia aktualizacja: {datetime.now(_WARSAW).strftime('%d.%m.%Y %H:%M')}"
     content = "\n".join(lines)

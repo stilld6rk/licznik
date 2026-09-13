@@ -654,6 +654,7 @@ def _build_historia_embed(nick: str) -> discord.Embed | None:
 
     embed = discord.Embed(
         title=f"📜 Historia wpłat: {data['discord_nick']}",
+        description=f"📅 Dołączył: **{data['join_date'].strftime('%d.%m.%Y')}**" if data['join_date'] else None,
         color=discord.Color.blue(),
         timestamp=datetime.now()
     )

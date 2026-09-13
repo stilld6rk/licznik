@@ -5,7 +5,7 @@ _WARSAW = ZoneInfo('Europe/Warsaw')
 from config import LIMIT, GUILD_NAME, GUILD_ID
 from db_helper import (
     get_all_active_members, get_all_payments_grouped, get_all_corrections_grouped,
-    get_corrections_with_comments, is_week_off, _get_all_member_info
+    get_corrections_with_comments, is_week_off, _get_all_member_info, get_all_vacations_grouped
 )
 import logging
 
@@ -34,6 +34,12 @@ def get_weeks_since_start() -> list:
     return get_weeks_since(START_DATE)
 
 
+def _on_vacation(nick: str, week_start: datetime, week_end: datetime, vacations_grouped: dict) -> bool:
+    """True if any vacation range for this nick overlaps [week_start, week_end]."""
+    ranges = vacations_grouped.get(nick.lower(), [])
+    return any(start <= week_end and end >= week_start for start, end in ranges)
+
+
 def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
     gid = guild_id or GUILD_ID
     lim = limit or LIMIT
@@ -42,6 +48,7 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
     payments_grouped = get_all_payments_grouped(gid)
     corrections_grouped = get_all_corrections_grouped(gid)
     member_info_map = _get_all_member_info(gid)
+    vacations_grouped = get_all_vacations_grouped()
 
     rankingi_per_tydzien = {}
     all_weeks = set(list(payments_grouped.keys()) + list(corrections_grouped.keys()))
@@ -80,11 +87,14 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
         ranking_dict = rankingi_per_tydzien.get(tydzien, {})
         wyniki[tydzien] = {}
 
+        tydzien_end = tydzien + timedelta(days=6)
+
         for nick in lista_dc:
             member_start = _join_week(nick)
             if tydzien < member_start:
                 continue
 
+            na_urlopie = _on_vacation(nick, tydzien, tydzien_end, vacations_grouped)
             wplata_raw = ranking_dict.get(nick, 0)
             przen = przeniesienia[nick]
             efektywna = wplata_raw + przen
@@ -93,7 +103,8 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
                 nadwyzka = efektywna - lim
                 wyswietlana = lim
             elif efektywna <= 0:
-                nadwyzka = efektywna - lim
+                # Na urlopie: tydzień dotknięty urlopem nie generuje/nie przenosi długu
+                nadwyzka = 0 if na_urlopie else efektywna - lim
                 wyswietlana = 0
             else:
                 nadwyzka = 0
@@ -104,6 +115,7 @@ def oblicz_zaleglosci(guild_id: int = None, limit: int = None) -> tuple:
                 "ilosc_wyswietlana": wyswietlana,
                 "przeniesienie_z": przen,
                 "przeniesienie_na": nadwyzka,
+                "na_urlopie": na_urlopie,
             }
             przeniesienia[nick] = nadwyzka
 
@@ -149,8 +161,12 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
         if join_date:
             display += f" (Dołączył: {join_date.strftime('%d.%m')})"
 
+        na_urlopie = dane.get('na_urlopie') and ilosc_raw <= 0
+
         if przen_z > 0:
             detail = f"(wpłacono {ilosc_raw}💎 | NadD +{przen_z})"
+        elif na_urlopie:
+            detail = "(🏖️ Urlop — brak wymaganej wpłaty)"
         elif przen_z < 0:
             detail = f"(wpłacono {ilosc_raw}💎 | NieD {przen_z})"
         else:
@@ -159,6 +175,8 @@ def build_ranking_content(guild_id: int = None, guild_name: str = None, limit: i
         if efektywna >= lim:
             ikona = medals[medal_idx] if medal_idx < 3 else "🔹"
             medal_idx += 1
+        elif na_urlopie:
+            ikona = "🏖️"
         elif efektywna > 0:
             ikona = "🔹"
         else:

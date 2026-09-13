@@ -1,5 +1,5 @@
 from sqlalchemy import func
-from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig
+from database import get_session, GuildMember, Payment, ManualCorrection, WeeklyMessage, DebtCarryover, GuildConfig, Vacation
 from config import GUILD_ID, RANKING_CHANNEL_ID
 from datetime import datetime, timedelta
 
@@ -134,6 +134,8 @@ def deactivate_member(nick: str, guild_id: int = None) -> bool:
 
 def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
     """Rename a member and merge into existing record if new_nick already exists.
+    Payments/corrections are a global ledger keyed by nick text, so the rename
+    must repoint their `nick` column too — not just the GuildMember row.
     Returns 'renamed', 'merged', or 'not_found'."""
     gid = guild_id or GUILD_ID
     session = get_session()
@@ -141,12 +143,14 @@ def rename_member(old_nick: str, new_nick: str, guild_id: int = None) -> str:
         old = session.query(GuildMember).filter_by(guild_id=gid, nick=old_nick).first()
         if not old:
             return 'not_found'
+
+        session.query(Payment).filter(func.lower(Payment.nick) == old_nick.lower()).update(
+            {'nick': new_nick}, synchronize_session=False)
+        session.query(ManualCorrection).filter(func.lower(ManualCorrection.nick) == old_nick.lower()).update(
+            {'nick': new_nick}, synchronize_session=False)
+
         existing = session.query(GuildMember).filter_by(guild_id=gid, nick=new_nick).first()
         if existing and existing.id != old.id:
-            # Merge: move all payments and corrections from old → existing, then delete old
-            from database import Payment, ManualCorrection
-            session.query(Payment).filter_by(member_id=old.id).update({'member_id': existing.id})
-            session.query(ManualCorrection).filter_by(recipient_id=old.id).update({'recipient_id': existing.id})
             if old.discord_id and not existing.discord_id:
                 existing.discord_id = old.discord_id
             if old.join_date and not existing.join_date:
@@ -247,13 +251,13 @@ def get_member_info(nick: str, guild_id: int = None):
 # ── Payments ───────────────────────────────────────────────────────────────────
 
 def add_payment(nick: str, amount: float, date: datetime, item_name: str = None,
-                guild_id: int = None, source_guild_name: str = None):
+                source_guild_name: str = None):
+    """Payments are a global ledger keyed by nick — not tied to any guild."""
     session = get_session()
     try:
-        member = get_or_create_member(nick, guild_id=guild_id)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         payment = Payment(
-            member_id=member.id, nick=nick, source_guild_name=source_guild_name,
+            nick=nick, source_guild_name=source_guild_name,
             amount=amount, date=date, item_name=item_name, week_start=week_start,
         )
         session.add(payment)
@@ -265,14 +269,17 @@ def add_payment(nick: str, amount: float, date: datetime, item_name: str = None,
 def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
                           payer: str = None, comment: str = None, set_by: int = None,
                           guild_id: int = None, discord_id: int = None):
+    """The correction itself is a global ledger entry keyed by nick. `guild_id`
+    is only used to ensure a roster placeholder exists in the guild the command
+    was invoked from (exempt from role-loss cleanup, visible on that roster)."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
         # added_manually exempts from role-loss cleanup; use real discord_id when available
-        recipient = get_or_create_member(recipient_nick, discord_id=discord_id or 0, guild_id=gid, added_manually=True)
+        get_or_create_member(recipient_nick, discord_id=discord_id or 0, guild_id=gid, added_manually=True)
         week_start = (date - timedelta(days=date.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         correction = ManualCorrection(
-            recipient_id=recipient.id, payer=payer, amount=amount,
+            nick=recipient_nick, payer=payer, amount=amount,
             date=date, week_start=week_start, comment=comment, set_by=set_by
         )
         session.add(correction)
@@ -282,17 +289,30 @@ def add_manual_correction(recipient_nick: str, amount: float, date: datetime,
 
 
 def get_corrections_for_week(week_start: datetime, guild_id: int = None) -> dict:
+    """Corrections are a global ledger; scope here to nicks on this guild's active roster."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
-        corrections = session.query(ManualCorrection).join(GuildMember).filter(
+        members = session.query(GuildMember).filter(
             GuildMember.guild_id == gid,
+            GuildMember.is_active == True,
+            GuildMember.discord_id.isnot(None),
+            GuildMember.added_manually == False,
+        ).all()
+        nick_map = {m.nick.lower(): m.nick for m in members}
+        if not nick_map:
+            return {}
+
+        corrections = session.query(ManualCorrection).filter(
+            func.lower(ManualCorrection.nick).in_(nick_map.keys()),
             ManualCorrection.week_start == week_start
         ).all()
         result = {}
         for corr in corrections:
-            nick = corr.recipient.nick
-            result.setdefault(nick, []).append(corr)
+            canonical = nick_map.get(corr.nick.lower())
+            if not canonical:
+                continue
+            result.setdefault(canonical, []).append(corr)
         return result
     finally:
         session.close()
@@ -323,14 +343,11 @@ def is_week_off(week_start: datetime, guild_id: int = None) -> bool:
         session.close()
 
 
-def delete_correction(correction_id: int, guild_id: int = None):
-    gid = guild_id or GUILD_ID
+def delete_correction(correction_id: int):
+    """Corrections are a global ledger — deletable by any guild's admin."""
     session = get_session()
     try:
-        corr = session.query(ManualCorrection).join(GuildMember).filter(
-            ManualCorrection.id == correction_id,
-            GuildMember.guild_id == gid
-        ).first()
+        corr = session.query(ManualCorrection).filter_by(id=correction_id).first()
         if corr:
             session.delete(corr)
             session.commit()
@@ -380,6 +397,7 @@ def get_all_payments_grouped(guild_id: int = None) -> dict:
 
 
 def get_all_corrections_grouped(guild_id: int = None) -> dict:
+    """Corrections are a global ledger; scope here to nicks on this guild's active roster."""
     gid = guild_id or GUILD_ID
     session = get_session()
     try:
@@ -395,13 +413,13 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
         lower_nicks = [n.lower() for n in nicks]
         nick_map = {n.lower(): n for n in nicks}
 
-        results = session.query(ManualCorrection).join(GuildMember).filter(
-            func.lower(GuildMember.nick).in_(lower_nicks)
+        results = session.query(ManualCorrection).filter(
+            func.lower(ManualCorrection.nick).in_(lower_nicks)
         ).all()
 
         grouped = {}
         for corr in results:
-            canonical = nick_map.get((corr.recipient.nick or '').lower())
+            canonical = nick_map.get((corr.nick or '').lower())
             if not canonical:
                 continue
             ws = corr.week_start.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -411,31 +429,30 @@ def get_all_corrections_grouped(guild_id: int = None) -> dict:
         session.close()
 
 
-def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
-    """Return all logs for a nick. Payments are cross-guild (tagged by source_guild_name).
-    Corrections are scoped to guild_id (they are guild-specific manual entries)."""
-    gid = guild_id or GUILD_ID
+def get_all_logs_for_nick(nick: str) -> dict:
+    """Return all logs for a nick — payments and corrections are both a global
+    ledger, independent of any guild. Returns None only if the nick has no
+    roster record anywhere and no ledger history at all."""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
-        if not member:
-            return None
+        member = session.query(GuildMember).filter(
+            func.lower(GuildMember.nick) == nick.lower()
+        ).first()
         payments = session.query(Payment).filter(
             func.lower(Payment.nick) == nick.lower()
         ).order_by(Payment.date.desc()).all()
-        # Cross-guild: find corrections for active role members with this nick (exclude stale/manual records)
-        all_members_with_nick = session.query(GuildMember).filter(
-            func.lower(GuildMember.nick) == nick.lower(),
-            GuildMember.is_active == True,
-            GuildMember.added_manually == False,
-        ).all()
-        member_ids = [m.id for m in all_members_with_nick]
         corrections = session.query(ManualCorrection).filter(
-            ManualCorrection.recipient_id.in_(member_ids)
+            func.lower(ManualCorrection.nick) == nick.lower()
         ).order_by(ManualCorrection.date.desc()).all()
+
+        if not member and not payments and not corrections:
+            return None
+
+        display_nick = member.nick if member else nick
+        discord_nick = (member.discord_nick or member.nick) if member else nick
         return {
-            'nick': member.nick,
-            'discord_nick': member.discord_nick or member.nick,
+            'nick': display_nick,
+            'discord_nick': discord_nick,
             'payments': [
                 {'date': p.date, 'amount': p.amount, 'item': p.item_name,
                  'week_start': p.week_start, 'source_guild': p.source_guild_name}
@@ -451,14 +468,13 @@ def get_all_logs_for_nick(nick: str, guild_id: int = None) -> dict:
         session.close()
 
 
-def get_corrections_for_nick(nick: str, guild_id: int = None) -> list:
-    gid = guild_id or GUILD_ID
+def get_corrections_for_nick(nick: str) -> list:
+    """Corrections are a global ledger — no guild scoping."""
     session = get_session()
     try:
-        member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
-        if not member:
-            return []
-        corrections = session.query(ManualCorrection).filter_by(recipient_id=member.id).order_by(ManualCorrection.date.desc()).all()
+        corrections = session.query(ManualCorrection).filter(
+            func.lower(ManualCorrection.nick) == nick.strip().lower()
+        ).order_by(ManualCorrection.date.desc()).all()
         return [
             {'id': c.id, 'date': c.date, 'amount': c.amount, 'payer': c.payer, 'comment': c.comment, 'week_start': c.week_start}
             for c in corrections
@@ -509,16 +525,19 @@ def get_corrections_with_comments(week_start: datetime, guild_id: int = None) ->
         if not nicks:
             return {}
         lower_nicks = [n.lower() for n in nicks]
+        nick_map = {n.lower(): n for n in nicks}
 
-        results = session.query(ManualCorrection).join(GuildMember).filter(
-            func.lower(GuildMember.nick).in_(lower_nicks),
+        results = session.query(ManualCorrection).filter(
+            func.lower(ManualCorrection.nick).in_(lower_nicks),
             ManualCorrection.week_start == week_start,
             ManualCorrection.comment.isnot(None)
         ).all()
         grouped = {}
         for corr in results:
-            nick = corr.recipient.nick
-            grouped.setdefault(nick, []).append((int(corr.amount), corr.comment))
+            canonical = nick_map.get((corr.nick or '').lower())
+            if not canonical:
+                continue
+            grouped.setdefault(canonical, []).append((int(corr.amount), corr.comment))
         return grouped
     finally:
         session.close()
@@ -541,6 +560,65 @@ def _get_all_member_info(guild_id: int = None) -> dict:
             }
             for m in members
         }
+    finally:
+        session.close()
+
+
+# ── Vacations (urlop) ──────────────────────────────────────────────────────────
+# Global by nick, like payments/corrections — exempts a player from payment
+# requirements for any week overlapping [start_date, end_date], across all guilds.
+
+def add_vacation(nick: str, start_date: datetime, end_date: datetime,
+                 comment: str = None, set_by: int = None) -> int:
+    session = get_session()
+    try:
+        vacation = Vacation(
+            nick=nick, start_date=start_date, end_date=end_date,
+            comment=comment, set_by=set_by,
+        )
+        session.add(vacation)
+        session.commit()
+        return vacation.id
+    finally:
+        session.close()
+
+
+def get_vacations_for_nick(nick: str) -> list:
+    session = get_session()
+    try:
+        vacations = session.query(Vacation).filter(
+            func.lower(Vacation.nick) == nick.strip().lower()
+        ).order_by(Vacation.start_date.desc()).all()
+        return [
+            {'id': v.id, 'start_date': v.start_date, 'end_date': v.end_date, 'comment': v.comment}
+            for v in vacations
+        ]
+    finally:
+        session.close()
+
+
+def delete_vacation(vacation_id: int) -> bool:
+    session = get_session()
+    try:
+        vacation = session.query(Vacation).filter_by(id=vacation_id).first()
+        if not vacation:
+            return False
+        session.delete(vacation)
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def get_all_vacations_grouped() -> dict:
+    """nick.lower() -> [(start_date, end_date), ...], for weekly exemption checks."""
+    session = get_session()
+    try:
+        vacations = session.query(Vacation).all()
+        grouped = {}
+        for v in vacations:
+            grouped.setdefault(v.nick.lower(), []).append((v.start_date, v.end_date))
+        return grouped
     finally:
         session.close()
 

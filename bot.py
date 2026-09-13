@@ -10,7 +10,7 @@ from db_helper import (
     get_pinned_message_id_for, save_pinned_message_id_for,
     save_guild_config, get_guild_config, get_all_active_guild_configs,
     get_guild_configs_for_server, deactivate_guild_config, rename_member, deactivate_member,
-    clear_all_payments,
+    clear_all_payments, add_vacation, get_vacations_for_nick, delete_vacation,
 )
 from calculator import build_ranking_content, build_overall_ranking_content
 from scraper import run_scraper
@@ -91,8 +91,7 @@ class HistoriaModal(discord.ui.Modal, title="Historia wpłat"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         nick = self.nick.value.strip()
-        configs = get_guild_configs_for_server(interaction.guild_id)
-        embed = _build_historia_embed(nick, configs)
+        embed = _build_historia_embed(nick)
         if embed is None:
             await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
             return
@@ -374,7 +373,7 @@ async def wpata_reczna_command(
         )
         logger.info(f"💳 {payer or '?'} → {recipient}: {amount}💎 ({reason}) [discord_id={discord_id_for_recipient}]")
 
-        await update_ranking(game_guild_id)
+        await update_all_rankings()
 
         cfg = _get_cfg(interaction)
         embed = discord.Embed(
@@ -645,16 +644,11 @@ async def ranking_ogolny_command(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
 
 
-def _build_historia_embed(nick: str, configs: list) -> discord.Embed | None:
-    """Build historia embed. Finds nick in any guild config, then shows all cross-guild payments."""
+def _build_historia_embed(nick: str) -> discord.Embed | None:
+    """Build historia embed. Payments/corrections are a global ledger by nick."""
     from collections import defaultdict
 
-    # Find the member record in any of the server's guilds
-    data = None
-    for cfg in configs:
-        data = get_all_logs_for_nick(nick, guild_id=cfg.ranking_channel_id)
-        if data:
-            break
+    data = get_all_logs_for_nick(nick)
     if not data:
         return None
 
@@ -713,8 +707,7 @@ async def historia_command(interaction: discord.Interaction, nick: str):
             await interaction.response.send_message("❌ Tylko członkowie gildii mogą używać tej komendy", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        configs = get_guild_configs_for_server(interaction.guild_id)
-        embed = _build_historia_embed(nick.strip(), configs)
+        embed = _build_historia_embed(nick.strip())
         if embed is None:
             await interaction.followup.send(f"❌ Nie znaleziono gracza: **{nick}**", ephemeral=True)
             return
@@ -756,6 +749,9 @@ async def pomoc_command(interaction: discord.Interaction):
             "`/usuń_wpłatę <ID>` — Usuń wpłatę ręczną po ID\n"
             "`/edytuj_wpłatę <ID> [kwota] [komentarz]` — Edytuj wpłatę ręczną\n"
             "`/ustaw_dołączenie <nick> <data>` — Ustaw datę dołączenia (DD.MM.YYYY)\n"
+            "`/urlop <nick> <od> <do> [powód]` — Ustaw urlop (zwalnia z wpłat na ten okres)\n"
+            "`/lista_urlopów <nick>` — Pokaż urlopy gracza z ID\n"
+            "`/usuń_urlop <ID>` — Usuń wpis urlopu po ID\n"
             "`/tydzień_off <true/false>` — Wyłącz/włącz bieżący tydzień\n"
             "`/zmień_nick <stary> <nowy>` — Zmień/popraw nick gracza w bazie\n"
             "`/usun_gracza <nick>` — Usuń gracza z rankingu (historia zachowana)\n"
@@ -845,7 +841,7 @@ async def lista_wplat_command(interaction: discord.Interaction, nick: str):
             return
 
         await interaction.response.defer(ephemeral=True)
-        corrections = get_corrections_for_nick(nick.strip(), guild_id=_resolve_game_guild_id(interaction))
+        corrections = get_corrections_for_nick(nick.strip())
 
         if not corrections:
             await interaction.followup.send(f"❌ Brak ręcznych wpłat dla: **{nick}**", ephemeral=True)
@@ -886,14 +882,13 @@ async def usun_wplate_command(interaction: discord.Interaction, id: int):
             return
 
         await interaction.response.defer(ephemeral=True)
-        game_guild_id = _resolve_game_guild_id(interaction)
-        ok = delete_correction(id, guild_id=game_guild_id)
+        ok = delete_correction(id)
         if not ok:
             await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
             return
 
-        await update_ranking(game_guild_id)
-        await interaction.followup.send(f"✅ Usunięto wpłatę ID:{id} i zaktualizowano ranking.", ephemeral=True)
+        await update_all_rankings()
+        await interaction.followup.send(f"✅ Usunięto wpłatę ID:{id} i zaktualizowano rankingi.", ephemeral=True)
 
     except Exception as e:
         logger.error(f"❌ Błąd usuń_wpłatę: {e}")
@@ -927,7 +922,7 @@ async def edytuj_wplate_command(interaction: discord.Interaction, id: int, kwota
             await interaction.followup.send(f"❌ Nie znaleziono wpłaty o ID: **{id}**", ephemeral=True)
             return
 
-        await update_ranking(_resolve_game_guild_id(interaction))
+        await update_all_rankings()
 
         changes = []
         if kwota is not None:
@@ -939,6 +934,125 @@ async def edytuj_wplate_command(interaction: discord.Interaction, id: int, kwota
 
     except Exception as e:
         logger.error(f"❌ Błąd edytuj_wpłatę: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ── Vacations (urlop) ────────────────────────────────────────────────────────
+
+def _parse_date(date: str) -> datetime | None:
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+@bot.tree.command(name="urlop", description="[ADMIN] Ustaw urlop gracza (zwalnia z wpłat na ten okres, we wszystkich gildiach)")
+@app_commands.describe(
+    nick="Nick gracza",
+    od="Data od (DD.MM.YYYY lub YYYY-MM-DD)",
+    do="Data do (DD.MM.YYYY lub YYYY-MM-DD)",
+    komentarz="Powód (opcjonalne)",
+)
+async def urlop_command(interaction: discord.Interaction, nick: str, od: str, do: str, komentarz: str = None):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to ustawiać", ephemeral=True)
+            return
+
+        start_date = _parse_date(od)
+        end_date = _parse_date(do)
+        if not start_date or not end_date:
+            await interaction.response.send_message("❌ Zły format daty! Użyj: DD.MM.YYYY lub YYYY-MM-DD", ephemeral=True)
+            return
+        if start_date > end_date:
+            await interaction.response.send_message("❌ Data \"od\" musi być wcześniejsza lub równa dacie \"do\"", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        nick = nick.strip()
+        vacation_id = add_vacation(nick, start_date, end_date, comment=komentarz, set_by=interaction.user.id)
+        await update_all_rankings()
+
+        embed = discord.Embed(title="✅ Urlop zapisany", color=discord.Color.blue(), timestamp=datetime.now())
+        embed.add_field(name="🔹 Gracz", value=f"**{nick}**", inline=False)
+        embed.add_field(name="📅 Okres", value=f"**{start_date.strftime('%d.%m.%Y')} — {end_date.strftime('%d.%m.%Y')}**", inline=False)
+        if komentarz:
+            embed.add_field(name="🔹 Powód", value=f"*{komentarz}*", inline=False)
+        embed.set_footer(text=f"ID: {vacation_id} · Ustawił: {interaction.user.name}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"❌ Błąd urlop: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="lista_urlopów", description="[ADMIN] Pokaż urlopy gracza")
+@app_commands.describe(nick="Nick gracza")
+async def lista_urlopow_command(interaction: discord.Interaction, nick: str):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        vacations = get_vacations_for_nick(nick.strip())
+
+        if not vacations:
+            await interaction.followup.send(f"❌ Brak urlopów dla: **{nick}**", ephemeral=True)
+            return
+
+        lines = []
+        for v in vacations:
+            line = f"`ID:{v['id']}` **{v['start_date'].strftime('%d.%m.%Y')} — {v['end_date'].strftime('%d.%m.%Y')}**"
+            if v['comment']:
+                line += f" — *{v['comment']}*"
+            lines.append(line)
+
+        embed = discord.Embed(
+            title=f"🏖️ Urlopy: {nick}",
+            description="\n".join(lines),
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text="Użyj /usuń_urlop <ID> aby usunąć wpis")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"❌ Błąd lista_urlopów: {e}")
+        try:
+            await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="usuń_urlop", description="[ADMIN] Usuń wpis urlopu po ID")
+@app_commands.describe(id="ID urlopu (widoczne w /lista_urlopów)")
+async def usun_urlop_command(interaction: discord.Interaction, id: int):
+    try:
+        if not is_admin(interaction):
+            await interaction.response.send_message("❌ Tylko admini mogą to robić", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        ok = delete_vacation(id)
+        if not ok:
+            await interaction.followup.send(f"❌ Nie znaleziono urlopu o ID: **{id}**", ephemeral=True)
+            return
+
+        await update_all_rankings()
+        await interaction.followup.send(f"✅ Usunięto urlop ID:{id} i zaktualizowano rankingi.", ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"❌ Błąd usuń_urlop: {e}")
         try:
             await interaction.followup.send(f"❌ Błąd: {str(e)}", ephemeral=True)
         except Exception:

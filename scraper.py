@@ -3,6 +3,7 @@ import io
 import pandas as pd
 import requests
 from playwright.sync_api import sync_playwright
+from sqlalchemy import func
 from datetime import datetime, timedelta
 from config import HARD_LOGIN, HARD_PASSWORD, HARD_PIN, GUILD_ID, ROLE_ID, DISCORD_BOT_TOKEN as BOT_TOKEN, HEADLESS
 from db_helper import get_or_create_member, add_payment, get_all_active_members, _update_discord_nick, get_all_active_guild_configs, save_guild_config
@@ -217,17 +218,16 @@ def scrape_hard_logs(login: str = None, password: str = None, pin: str = None) -
             return []
 
 
-def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = None):
-    """Zapisz dane scrapowania.
-    Deduplication is by (nick, date, amount, source_guild_name) — cross-guild.
+def save_scrape_to_db(records: list, guild_name: str = None):
+    """Zapisz dane scrapowania. Payments to globalny ledger po nicku —
+    nie są przypisywane do żadnej konkretnej gildii/membera, więc scraper
+    różnych gildii nigdy nie może pomylić czyją to wpłata.
+    Deduplication is by (nick, date, amount) — cross-guild.
     A payment is saved once regardless of how many guild counters share the same credentials."""
-    from database import get_session, Payment, GuildMember
-    gid = guild_id or GUILD_ID
-    src = guild_name or str(gid)
+    from database import get_session, Payment
+    src = guild_name or "?"
     saved = 0
     skipped_dup = 0
-    skipped_no_member = 0
-    no_member_nicks = set()
 
     logger.info(f"[{src}] 📥 Otrzymano {len(records)} wpisów do zapisania")
     for r in records[:5]:
@@ -240,30 +240,10 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
         date = record['Data']
         try:
             session = get_session()
-
-            # Find member first (needed for member_id-based dedup of old rows with nick=NULL)
-            member = session.query(GuildMember).filter_by(guild_id=gid, nick=nick).first()
-            if not member:
-                member = session.query(GuildMember).filter_by(nick=nick).first()
-
-            if not member:
-                session.close()
-                skipped_no_member += 1
-                no_member_nicks.add(nick)
-                continue
-
-            member_guild_id = member.guild_id
-            member_id = member.id
-
-            # Dedup: same date+amount for this nick OR this member_id (covers old rows where nick=NULL)
-            from sqlalchemy import or_ as sa_or
             exists = session.query(Payment).filter(
+                func.lower(Payment.nick) == nick.lower(),
                 Payment.date == date,
                 Payment.amount == amount,
-                sa_or(
-                    Payment.nick == nick,
-                    Payment.member_id == member_id,
-                )
             ).first()
             session.close()
 
@@ -276,7 +256,6 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
                 amount=amount,
                 date=date,
                 item_name=record['Przedmiot'],
-                guild_id=member_guild_id,
                 source_guild_name=src,
             )
             saved += 1
@@ -284,9 +263,7 @@ def save_scrape_to_db(records: list, guild_id: int = None, guild_name: str = Non
         except Exception as e:
             logger.error(f"❌ Błąd przy zapisie wpłaty {nick}: {e}")
 
-    if no_member_nicks:
-        logger.warning(f"[{src}] ⚠️  Brak rekordu członka (pominięto {skipped_no_member}): {sorted(no_member_nicks)}")
-    logger.info(f"[{src}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped_dup} duplikatów, {skipped_no_member} bez członka")
+    logger.info(f"[{src}] ✅ Zapisano {saved} nowych wpłat, pominięto {skipped_dup} duplikatów")
 
 
 def run_scraper():
@@ -300,7 +277,7 @@ def run_scraper():
         get_discord_members(GUILD_ID, ROLE_ID)
         records = scrape_hard_logs()
         if records:
-            save_scrape_to_db(records, GUILD_ID, guild_name="default")
+            save_scrape_to_db(records, guild_name="default")
         logger.info("✅ Scraper ukończony (tryb legacy)")
         return
 
@@ -328,7 +305,7 @@ def run_scraper():
         records = seen_creds[creds]
         if records:
             logger.info(f"💾 Zapisuję wpłaty: {cfg.guild_name}")
-            save_scrape_to_db(records, game_guild_id, guild_name=cfg.guild_name)
+            save_scrape_to_db(records, guild_name=cfg.guild_name)
 
     logger.info("✅ Scraper ukończony")
 

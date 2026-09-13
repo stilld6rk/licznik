@@ -22,36 +22,35 @@ class GuildMember(Base):
 
     __table_args__ = (UniqueConstraint('guild_id', 'nick', name='uq_guild_nick'),)
 
-    payments = relationship("Payment", back_populates="member")
-    corrections = relationship("ManualCorrection", back_populates="recipient")
-
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Payment(Base):
+    """Global ledger entry — not scoped to any guild. Identity is `nick` alone,
+    so the same player's payments stay together regardless of which tracked
+    guild they currently belong to."""
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True)
-    member_id = Column(Integer, ForeignKey("guild_members.id"), nullable=True)
-    # Denormalized nick for cross-guild lookup without joins
-    nick = Column(String(100), nullable=True)
-    # Which game guild's treasury log this payment came from
+    nick = Column(String(100), nullable=False)
+    # Which game guild's treasury log this payment came from (informational only)
     source_guild_name = Column(String(100), nullable=True)
     amount = Column(Float, nullable=False)
     date = Column(DateTime, nullable=False)
     item_name = Column(String(255), nullable=True)
     week_start = Column(DateTime, nullable=False)
 
-    member = relationship("GuildMember", back_populates="payments")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ManualCorrection(Base):
+    """Global ledger entry (like Payment) — identified by `nick`, not tied to
+    a specific guild's GuildMember row."""
     __tablename__ = "manual_corrections"
 
     id = Column(Integer, primary_key=True)
-    recipient_id = Column(Integer, ForeignKey("guild_members.id"), nullable=False)
+    nick = Column(String(100), nullable=False)
     payer = Column(String(100), nullable=True)
     amount = Column(Float, nullable=False)
     date = Column(DateTime, nullable=False)
@@ -59,9 +58,23 @@ class ManualCorrection(Base):
     comment = Column(Text, nullable=True)
     set_by = Column(BigInteger, nullable=True)
 
-    recipient = relationship("GuildMember", back_populates="corrections")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Vacation(Base):
+    """Global urlop entry — exempts a nick from payment requirements for any
+    week overlapping [start_date, end_date], across all guilds."""
+    __tablename__ = "vacations"
+
+    id = Column(Integer, primary_key=True)
+    nick = Column(String(100), nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    comment = Column(Text, nullable=True)
+    set_by = Column(BigInteger, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class WeeklyMessage(Base):
@@ -191,6 +204,20 @@ def init_db():
             # Delete any remaining orphaned payments with no nick and no valid member
             """DELETE FROM payments WHERE nick IS NULL
                AND (member_id IS NULL OR member_id NOT IN (SELECT id FROM guild_members))""",
+            # Payments become a fully global ledger keyed by nick — drop the per-guild member_id link
+            """UPDATE payments p SET nick = gm.nick FROM guild_members gm
+               WHERE gm.id = p.member_id AND p.nick IS NULL""",
+            "DELETE FROM payments WHERE nick IS NULL",
+            "ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_member_id_fkey",
+            "ALTER TABLE payments DROP COLUMN IF EXISTS member_id",
+            "ALTER TABLE payments ALTER COLUMN nick SET NOT NULL",
+            # Manual corrections become a global ledger keyed by nick too, same as payments
+            "ALTER TABLE manual_corrections ADD COLUMN IF NOT EXISTS nick VARCHAR(100)",
+            """UPDATE manual_corrections mc SET nick = gm.nick FROM guild_members gm
+               WHERE gm.id = mc.recipient_id AND mc.nick IS NULL""",
+            "ALTER TABLE manual_corrections DROP CONSTRAINT IF EXISTS manual_corrections_recipient_id_fkey",
+            "ALTER TABLE manual_corrections DROP COLUMN IF EXISTS recipient_id",
+            "ALTER TABLE manual_corrections ALTER COLUMN nick SET NOT NULL",
         ]
         for sql in migrations:
             try:
